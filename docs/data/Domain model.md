@@ -1,58 +1,34 @@
 Domain model.md
 
+Unless otherwise stated below, geographical features have a name and an approximate boundary 
+
 River:
 name
-start_point
-end_point
+approximate_start_point
+approximate_end_point
 tributaries
-
+intermediate_lakes
 
 Valley:
 name
 approx_boundary
 confidence
 
-Plains:
-name
-approx_boundary
-
-Forest:
-name
-approx_boundary
-
-Grassland:
-name
-approx_boundary
 
 Gorge:
 name
 approx_boundary
+line_of_max_depth
 
-Volcano
+Volcano:
 name
-approx_boundary
-extinct
-
-
-NationalPark:
-name
-approx_boundary
-
-StateForest
-name
-approx_boundary
-
-StatePark
-name
-approx_boundary
-
-Peninsula
-name
-approx_boundary
-
+approx_boundary_of_base
+approx_boundary_cone
+extinct_or_active
 
 WalkingTrack:
 name
+geographic_region
 start_point
 end_point
 
@@ -64,25 +40,7 @@ ridgeline
 confidence
 source
 subranges
-
-
-
-Region:
-name
-approx_boundary
-
-Reefs:
-name
-approx_boundary
-
-Desert:
-name
-geometry
-
-
-Isles:
-name
-approx_boundary
+parent_range
 
 
 Road:

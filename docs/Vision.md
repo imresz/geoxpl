@@ -12,4 +12,6 @@ Rivers highlighted source-to-mouth.
 Mountain ranges displaying approximate boundaries with confidence.
 Elevation gradients are optional.
 Every displayed geometry includes provenance.
-Links should be available to further information
+Links should be available to further information.
+
+A MVP would do the following using Murray River as an example: search “Murray River”, select the right feature from the search results, highlight the intended extent, fit the map to it, and show provenance. If the extent is approximate, note it
