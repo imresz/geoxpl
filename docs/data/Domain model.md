@@ -1,4 +1,4 @@
-Domain model.md
+# geoxpl
 
 Unless otherwise stated below, geographical features have a name and an approximate boundary 
 

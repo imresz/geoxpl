@@ -1,5 +1,4 @@
 # geoxpl
-Architecture Decision Record.
 
 Use this folder to keep track of decisions relating to the main design points.
 This is a living folder that provides memory.
