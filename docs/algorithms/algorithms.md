@@ -1,5 +1,7 @@
 # geoxpl
 
+Do not analyse the raw world from scratch on every query. Preprocess the difficult data, then assemble or derive the requested feature on demand.
+
 Raw source data
       ↓
 Preprocessed geographic data

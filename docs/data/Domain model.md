@@ -1,53 +1,94 @@
 # geoxpl
 
-Unless otherwise stated below, geographical features have a name and an approximate boundary 
+Feature
 
-River:
-name
-approximate_start_point
-approximate_end_point
-tributaries
-intermediate_lakes
+A named geographic entity.
 
-Valley:
-name
-approx_boundary
-confidence
+May have multiple geometries.
+
+Every geometry has provenance.
+
+Every interpretation has confidence.
 
 
-Gorge:
-name
-approx_boundary
-line_of_max_depth
 
-Volcano:
-name
-approx_boundary_of_base
-approx_boundary_cone
-extinct_or_active
+Road
 
-WalkingTrack:
-name
-geographic_region
-start_point
-end_point
+has 
 
+• name
+• start location
+• end location
+• surface
+• gradient profile
+• length
 
-MountainRange:
-name
-approx_boundary
-ridgeline
-confidence
-source
-subranges
-parent_range
+is
+• a line
+• may have a direction
+• may have route number
+• may run through many regions
+• may be divided
 
 
-Road:
-name
-geometry
-start_point
-end_point
-surface
-gradient_profile
 
+
+River
+
+has
+
+• name
+• source
+• mouth
+• main stem
+• direction
+• tributaries
+• anabranches
+• flow direction
+• watershed
+• approximate length
+
+is
+
+• a directed network
+• may flow through lakes
+• may have multiple headwaters
+• may change names
+
+Mountain
+
+has
+
+• name
+• height
+• peak
+
+is
+• may be part of a range
+• may have either a clearly defined base or an approximate extent
+
+Mountain range
+
+has 
+
+• name
+• approximate extent
+
+is 
+• may have one or more ridgelines
+• may have sub ranges
+• may have a parent range
+
+Valley
+
+has
+
+• name
+• approximate extent
+
+is
+may be derived from surrounding contours
+may be derived from surround mountain ranges
+may be derived from one or more rivers
+
+ 
