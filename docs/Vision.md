@@ -8,6 +8,7 @@ Google Maps typically places a pin in the middle of a region and does not show t
 
 Examples of the results the app should show are:
 Roads highlighted end-to-end.
+Routes highlighted end-to-end.
 Rivers highlighted source-to-mouth.
 Mountain ranges displaying approximate boundaries with confidence.
 Elevation gradients are optional.

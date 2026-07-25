@@ -18,6 +18,8 @@ Always
 - document public APIs
 - use dependency injection
 - prefer composition
+- design for expandability of geographical features to be identified
 
 
 Everything has provenance.
+

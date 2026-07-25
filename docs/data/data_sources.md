@@ -1,12 +1,21 @@
+# geoxpl data_sources.md
 Raw source data
 
-This includes:
 
 OpenStreetMap roads, rivers and named features
-digital elevation models
-catchments and drainage basins
-government landform datasets
+Digital elevation models
+Catchments and drainage basins
+Government landform datasets.
 Wikidata and geographic names
+
+
+Trust levels in order from high to low
+Government
+OpenStreetMap roads, rivers and named features
+Wikidata and geographic names
+Private sources
+
+
 
 Preprocessed data
 
@@ -22,11 +31,4 @@ calculate catchment adjacency
 link OSM features to Wikidata
 normalise names and aliases
 
-When the user searches for a feature, the app performs only the feature-specific work:
 
-identify the intended feature
-assemble relevant geometry
-infer start and end points
-calculate extent
-calculate confidence
-return display-ready GeoJSON

@@ -13,9 +13,7 @@ Every interpretation has confidence.
 
 
 Road
-
 has 
-
 • name
 • start location
 • end location
@@ -34,9 +32,7 @@ is
 
 
 River
-
 has
-
 • name
 • source
 • mouth
@@ -49,16 +45,14 @@ has
 • approximate length
 
 is
-
 • a directed network
 • may flow through lakes
 • may have multiple headwaters
 • may change names
 
+
 Mountain
-
 has
-
 • name
 • height
 • peak
@@ -68,9 +62,7 @@ is
 • may have either a clearly defined base or an approximate extent
 
 Mountain range
-
 has 
-
 • name
 • approximate extent
 
@@ -80,15 +72,13 @@ is
 • may have a parent range
 
 Valley
-
 has
-
 • name
 • approximate extent
 
 is
-may be derived from surrounding contours
-may be derived from surround mountain ranges
-may be derived from one or more rivers
+• may be derived from surrounding contours
+• may be derived from surround mountain ranges
+• may be derived from one or more rivers
 
  

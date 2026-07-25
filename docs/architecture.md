@@ -1,4 +1,11 @@
-           UI
+# geoxpl architecture.md
+
+
+
+		UI
+			Browser
+  			MapLibre map
+			Search interface
 
           Search
              │
@@ -18,27 +25,3 @@
      │ PostGIS + OSM  │
      │ DEM + Govt GIS │
      └────────────────┘
-	 
-	 
-	 MVP below choose above or below
-	 
-	 
-	 Browser
-  │
-  ├── MapLibre map
-  └── Search interface
-          │
-          ▼
-      Web API
-          │
-  ┌───────┼────────┐
-  │       │        │
-Search   Road     River
-Engine   Engine   Engine
-  │       │        │
-  └───────┼────────┘
-          ▼
-      PostgreSQL
-       + PostGIS
-          │
-    OSM Australia extract

@@ -12,17 +12,7 @@ Cached result
 
 
 
-Raw source data
 
-	This includes:
-
-	OpenStreetMap roads, rivers and named features
-	digital elevation models
-	catchments and drainage basins
-	government landform datasets
-	Wikidata and geographic names
-
-	These datasets are not yet optimised for your app.
 
 Preprocessed data
 

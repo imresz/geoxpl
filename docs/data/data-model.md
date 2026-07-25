@@ -12,11 +12,11 @@ Geographic rules.
 	Unless otherwise stated below, geographic features are uncertain polygons
 	Roads are linear.
 	Rivers are directed graphs.
-	Mountains are dots with text showing the elevation
+	Mountains are dots with text showing the elevation and may be enclosed by an uncertain polygon.
 	Mountain ranges are uncertain polygons and may have a ridgeline. They may have sub ranges or belong to a parent range.
 	Gorges are uncertain polygons and may have a line of maximum depth.
 	Valleys are uncertain polygons and may be derived.
-	NationalParks have defined boundaries.
+	National Parks have defined boundaries.
 	Volcanoes may be two concentric uncertain polygons, one indicating the cone and one indicating the base.
 	
  
