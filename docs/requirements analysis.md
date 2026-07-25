@@ -1,12 +1,10 @@
-Requirements.md
+# geoxpl Requirements.md
 
 At a high level when I search for a geographic feature:
 I want to know:			
-	routing if geometry is composed of lines		
-	extent if geometry is spatial		
+	the path of the feature shown as a line on an interactive map if the geometry is composed of lines		
+	the extent of the feature shown as an irregular polygon if the geometry is spatial		
 	gradients		
-	surface type		
-	current status - seasonal open/close, in flood or dry, weather warnings		
 			
 The data comes from
 	government sources		
@@ -31,3 +29,6 @@ A separate sub system handles the pre-processing. Pre-processing is whereby the 
 
 Pre-processing can be triggered by unmatched search requests as well as manually by the system administrator.
 
+Future information about features:
+	surface type		
+	current status - seasonal open/close, in flood or dry, weather warnings		

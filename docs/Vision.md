@@ -1,4 +1,4 @@
-# geoxpl
+# geoxpl vision.md
 
 This project is for anyone wantinThg to locate and show the extent of geographical features such as rivers, mountain ranges, reefs etc on a map.
 

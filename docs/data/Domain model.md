@@ -61,6 +61,14 @@ is
 • may be part of a range
 • may have either a clearly defined base or an approximate extent
 
+NationalPark
+has
+name
+well defined extent
+
+is
+regular or irregular polygon
+
 Mountain range
 has 
 • name

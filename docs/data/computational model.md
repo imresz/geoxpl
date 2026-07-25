@@ -1,4 +1,4 @@
-# geoxpl
+# geoxpl computational model.md
 
 River
 
@@ -9,6 +9,10 @@ Road
 Represent a road as single or double solid line.
 Include a route number if known.
 Show all roads from a route number.
+
+NationalPark
+Represent as an irregular polygon
+Defined from official sources with no need to guess.
 
 
 Mountain

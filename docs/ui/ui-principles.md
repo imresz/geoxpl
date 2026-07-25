@@ -1,4 +1,4 @@
-# geoxpl
+# geoxpl ui-principple.md
 
 Present a web page with a search bar. The initial map should be centred on Victorian and include surrounding regions as necessay to display a feature. 
 A set of results is presented from which the use either selects one or chooses the option for further searching.
