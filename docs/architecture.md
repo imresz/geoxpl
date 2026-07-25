@@ -37,6 +37,7 @@ Background layer
 - 		a persistent job/request store;
 - 		a background worker;
 - 		feature-specific processors;
+-		data source processing engine which includes
 - 		a processed-feature catalogue/cache;
 - 		an approved source registry.
 - 		a geometry/API engine.
@@ -51,6 +52,11 @@ Data layer
 	   Cache
      └────────────────┘
 	 
+	 
+Aministration layer.
+
+Data source approval function
+Admin initiated	bulk feature processing
 	 
 Future Engines
      │ Terrain Engine │

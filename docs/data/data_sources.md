@@ -1,4 +1,5 @@
 # geoxpl data_sources.md
+
 Raw source data
 The initial data ingest
 
@@ -10,6 +11,8 @@ Wikidata and geographic names
 
 
 Data sources are assessed per feature attribute for authority, fitness, coverage, completeness, currency, provenance and licence.
+GeoXpl may automatically discover and assess candidate data sources. Newly discovered sources must be approved for a defined jurisdiction, feature type and attribute before contributing to published results. Updates from approved dataset series may be ingested automatically into staging and promoted only after validation.
+
 
 Data sources:
 •	Authoritative: Establishes official names, boundaries, classifications or legal status.

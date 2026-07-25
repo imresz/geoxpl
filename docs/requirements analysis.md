@@ -30,6 +30,8 @@ A separate sub system handles the pre-processing. Pre-processing is whereby the 
 
 Pre-processing can be triggered by unmatched search requests as well as manually by the system administrator.
 
+The system also has an administration area to approve data sources.
+
 Future information about features:
 	gradients	
 	surface type		
