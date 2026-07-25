@@ -1,18 +1,18 @@
 # geoxpl
 
-This project is for anyone wanting to locate and show the extent of geographical features such as rivers, mountain ranges, reefs etc on a map. The app will be aimed at independent travellers guiding themselves through regions as well as students of geography.
+This project is for anyone wantinThg to locate and show the extent of geographical features such as rivers, mountain ranges, reefs etc on a map.
 
-It attempts to make it easier to locate a geographical area even if only approximately, learn more about it and navigate to it.
+Additional information is also available such as gradient and topography, surface type, current status, legal standing, accessibility. 
 
-Google Maps typically places a pin in the middle of a region and does not show the extent. This system should improve on that.
 
 Examples of the results the app should show are:
-Roads highlighted end-to-end.
-Routes highlighted end-to-end.
+Roads identified by name highlighted end-to-end.
+Routes identified by name or route number highlighted end-to-end.
 Rivers highlighted source-to-mouth.
-Mountain ranges displaying approximate boundaries with confidence.
-Elevation gradients are optional.
+Regions identified by name and the extend identified even if only approximately
+Mountain ranges displaying approximate boundaries.
+Topology available
 Every displayed geometry includes provenance.
 Links should be available to further information.
 
-The background system should be able to respond to queries which it cannot resolve by further pre-processing and or further searching for raw data. In other words, it should be a query initiated self-learning system.
+The background system should be able to respond to queries which it cannot resolve by further pre-processing and or further searching for raw data.

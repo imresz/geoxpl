@@ -1,3 +1,3 @@
-The ui app should run on both Android and iOS platforms
+The user will interact with the system via browser web page 
 
 The back end should run on Ubuntu.

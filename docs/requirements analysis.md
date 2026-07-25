@@ -1,5 +1,25 @@
 Requirements.md
 
+At a high level when I search for a geographic feature:
+I want to know:			
+	routing if geometry is composed of lines		
+	extent if geometry is spatial		
+	gradients		
+	surface type		
+	current status - seasonal open/close, in flood or dry, weather warnings		
+			
+The data comes from
+	government sources		
+	open-source sources		
+	private sources with public access		
+			
+The system			
+	receieves a search query		
+	checks cached data	or	pre processes geographical features and creates cached data
+	displays data		
+	receives feedback		
+
+
 The system should present a web page with a search bar.
 The user can type, in plain freeform text, a geographical feature.
 Upon pressing enter, the system queries its database cache of processed features and returns one or more matching results.

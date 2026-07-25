@@ -2,6 +2,8 @@
 
 Do not analyse the raw world from scratch on every query. Preprocess the difficult data, then assemble or derive the requested feature on demand.
 
+The background activity
+
 Raw source data
       ↓
 Preprocessed geographic data
@@ -9,6 +11,8 @@ Preprocessed geographic data
 Query-time feature analysis
       ↓
 Cached result
+      ↓
+
 
 
 
@@ -28,7 +32,6 @@ Preprocessed data
 	link OSM features to Wikidata
 	normalise names and aliases
 
-	This work might take minutes or hours, but it happens periodically, not while a user waits.
 
 Query-time analysis
 
