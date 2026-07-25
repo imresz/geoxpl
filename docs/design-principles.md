@@ -1,3 +1,6 @@
+#GeoXpl design-principles.md
+#Specify high level considerations
+
 Design Principle 1
 
 Never invent geometry.

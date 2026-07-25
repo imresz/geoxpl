@@ -1,6 +1,6 @@
 # geoxpl vision.md
 
-This project is for anyone wantinThg to locate and show the extent of geographical features such as rivers, mountain ranges, reefs etc on a map.
+This project is for anyone wantin to explore geography by overlaying features onto interactive maps. Information such as path and extent are determined for geographical features such as rivers, mountain ranges, reefs etc on a map.
 
 Additional information is also available such as gradient and topography, surface type, current status, legal standing, accessibility. 
 
@@ -11,7 +11,7 @@ Routes identified by name or route number highlighted end-to-end.
 Rivers highlighted source-to-mouth.
 Regions identified by name and the extend identified even if only approximately
 Mountain ranges displaying approximate boundaries.
-Topology available
+Topography if available
 Every displayed geometry includes provenance.
 Links should be available to further information.
 

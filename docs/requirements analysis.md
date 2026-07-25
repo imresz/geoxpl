@@ -1,10 +1,11 @@
 # geoxpl Requirements.md
 
+
 At a high level when I search for a geographic feature:
 I want to know:			
 	the path of the feature shown as a line on an interactive map if the geometry is composed of lines		
 	the extent of the feature shown as an irregular polygon if the geometry is spatial		
-	gradients		
+	
 			
 The data comes from
 	government sources		
@@ -19,7 +20,7 @@ The system
 
 
 The system should present a web page with a search bar.
-The user can type, in plain freeform text, a geographical feature.
+The user can type, in plain freeform text, a geographical feature's name and also select the feature type from a drop down list.
 Upon pressing enter, the system queries its database cache of processed features and returns one or more matching results.
 The matching results are displayed as a selectable list of candidate features found in the database of cached results.
 Two things can happen here. The user selects from the list and the feature is displayed.
@@ -30,5 +31,6 @@ A separate sub system handles the pre-processing. Pre-processing is whereby the 
 Pre-processing can be triggered by unmatched search requests as well as manually by the system administrator.
 
 Future information about features:
+	gradients	
 	surface type		
 	current status - seasonal open/close, in flood or dry, weather warnings		

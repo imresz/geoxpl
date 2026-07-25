@@ -1,4 +1,6 @@
 # geoxpl computational model.md
+# Specify geometry to calculate
+
 
 River
 
@@ -11,8 +13,9 @@ Include a route number if known.
 Show all roads from a route number.
 
 NationalPark
-Represent as an irregular polygon
-Defined from official sources with no need to guess.
+Use an authoritative, versioned Polygon or MultiPolygon.
+Do not derive a replacement boundary in the MVP.
+
 
 
 Mountain
