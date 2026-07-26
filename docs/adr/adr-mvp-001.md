@@ -3,7 +3,7 @@
 
 # ADR 0001: MVP technical architecture
 
-Status: Proposed
+Status: Approved
 
 ## Context
 

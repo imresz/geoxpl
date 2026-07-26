@@ -1,9 +1,9 @@
-# geoxpl adr-mvp-001.md
+# geoxpl adr-mvp-002.md
 
 
-# ADR 0002: MVP technical architecture
+# ADR 0002: MVP administration and source approval
 
-Status: Proposed
+Status: Approved
 
 ## Context
 
@@ -12,13 +12,13 @@ GeoXpl needs an admin area to approve data sources and to initiate bulk feature 
 ## Decision
 
 Use a separate url.
-Security not yet required for MVP.
+Require authentication.
 Expose functionality through a web API.
 
 
 ## Alternatives considered
 
-Google Maps, native mobile applications, synchronous preprocessing.
+No admin UI, command-line administration, local-only administration, or authenticated web administration.  Admin required but local access through OpenClaw agent not certain
 
 ## Consequences
 

@@ -51,7 +51,6 @@ The engine(s) are called to do the following:
 -	calculate extent
 -	calculate confidence
 -	return display-ready GeoJSON
-
 -	Then the result is cached.
 	
 

@@ -26,7 +26,6 @@ Computational layer
      │ Road Engine 
 	 │ NationalPark Engine
      │ Boundary Engine
-	 │ Render Engine
      └───────┬────────┘
              │
 The computational layer interacts with the background layer by receiving requests to process identification and caching of geographical features. The computational layer receives a status from the background layer
@@ -36,7 +35,6 @@ Background layer
 	Background layer contains
 - 		a persistent job/request store;
 - 		a background worker;
-- 		feature-specific processors;
 -		data source processing engine which includes
 - 		a processed-feature catalogue/cache;
 - 		an approved source registry.
@@ -58,8 +56,11 @@ Aministration layer.
 Data source approval function
 Admin initiated	bulk feature processing
 	 
-Future Engines
-     │ Terrain Engine │
-	 │ Gradient Engine
-	 │ Surface Engine
-	   Status Engine
+	 
+Future Engines in computational layer
+     Terrain Engine
+	 Gradient Engine
+	 Surface Engine
+	 Status Engine
+	 Feature-specific processors;
+
