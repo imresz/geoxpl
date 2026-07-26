@@ -44,7 +44,7 @@ Medium confidence: Good source with gaps, transformations or minor disagreement.
 Low confidence: Sparse data, significant inference, unresolved disagreement or uncertain extent.
 
 
-Preprocessed data
+Preprocessed data.
 
 This is where expensive general-purpose work is done ahead of time and performed by the computational layer :
 

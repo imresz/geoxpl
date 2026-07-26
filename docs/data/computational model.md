@@ -1,5 +1,5 @@
 # geoxpl computational model.md
-# Specify geometry to calculate
+# Specify geometry to calculate Not all features appear in MVP
 
 
 River
