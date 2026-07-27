@@ -18,10 +18,10 @@ Expose functionality through a web API.
 
 ## Alternatives considered
 
-No admin UI, command-line administration, local-only administration, or authenticated web administration.  Admin required but local access through OpenClaw agent not certain
+No admin UI, command-line administration, local-only administration, or authenticated web administration.
 
 ## Consequences
 
-Security risk in short term.
+Risks not yet addressed: privileged operations, credential management, rate limiting, audit logging and potentially expensive bulk jobs.
 May casue heavy workload initially.
 

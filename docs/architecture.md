@@ -26,9 +26,20 @@ Computational layer
      │ Road Engine 
 	 │ NationalPark Engine
      │ Boundary Engine
+		a geometry/API engine.
+
      └───────┬────────┘
              │
-The computational layer interacts with the background layer by receiving requests to process identification and caching of geographical features. The computational layer receives a status from the background layer
+			 
+			 
+Search/API checks the processed-feature catalogue.
+Search/API submits slow work to the background coordinator.
+Background worker invokes the appropriate computational engine.
+Engine stores the resulting processed feature.
+Worker updates the job status.
+API reads the status and result.		 
+			 
+			 
 
 Background layer
 
@@ -38,7 +49,6 @@ Background layer
 -		data source processing engine which includes
 - 		a processed-feature catalogue/cache;
 - 		an approved source registry.
-- 		a geometry/API engine.
 
 The background layer works with the data layer and at the completion of processing sends its output to the cache.
 
@@ -62,5 +72,5 @@ Future Engines in computational layer
 	 Gradient Engine
 	 Surface Engine
 	 Status Engine
-	 Feature-specific processors;
+	 Additional feature-specific processors;
 

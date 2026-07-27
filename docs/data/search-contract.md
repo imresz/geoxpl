@@ -17,7 +17,7 @@ Searching “Murray River” and choosing the river item from the drop down lst,
 
 
 The search input comprises a name and a feature type. The feature type is select from a pull down list.
-Spelling mistakes, aliases, route numbers, and partial names are supported in MVP. However text can be case-insensitive. Fuzzy search features will be gradually included.
+Spelling mistakes, aliases, route numbers, and partial names are not supported in MVP. However text can be case-insensitive. Fuzzy search features will be gradually included.
 
 Identically named features are ranked in the following order:
 1. selected feature type;

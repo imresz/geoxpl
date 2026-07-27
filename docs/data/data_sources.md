@@ -11,7 +11,7 @@ Wikidata and geographic names
 
 
 Data sources are assessed per feature attribute for authority, fitness, coverage, completeness, currency, provenance and licence.
-GeoXpl may automatically discover and assess candidate data sources. Newly discovered sources must be approved for a defined jurisdiction, feature type and attribute before contributing to published results. Updates from approved dataset series may be ingested automatically into staging and promoted only after validation. Search results for features awaiting approval of data sources
+GeoXpl may automatically discover and assess candidate data sources. Newly discovered sources must be approved for a defined jurisdiction, feature type and attribute before contributing to published results. Updates from approved dataset series may be ingested automatically into staging and promoted only after validation. Search results for features awaiting approval of data sources: Internally, processing jobs waiting for source approval use awaiting_source_approval; public searches report processing.
 
 
 Data sources:

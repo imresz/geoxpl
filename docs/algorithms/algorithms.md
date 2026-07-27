@@ -60,4 +60,4 @@ When a feature is queried
 	2	b. If not found and will require significant pre-processing, return status=queued and show a try again soon message, then in the background perform preprocessing and caching.
 	3. If cannot be pre-processed look for more raw data. and try preprocessing again. 
 		
-The render engine is called to display the result.
+The API returns display-ready GeoJSON and MapLibre renders it in the browser.
