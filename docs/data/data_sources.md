@@ -8,6 +8,11 @@ Digital elevation models
 Catchments and drainage basins
 Government landform datasets.
 Wikidata and geographic names
+Victoria data
+Victorian road names and geometry; https://www.data.vic.gov.au/
+Victorian river names and geometry; https://www.data.vic.gov.au/
+cross-border river/road continuation; https://www.spatial.nsw.gov.au/ and https://data.sa.gov.au/
+Victorian National Park boundaries. https://www.data.vic.gov.au/
 
 
 Data sources are assessed per feature attribute for authority, fitness, coverage, completeness, currency, provenance and licence.
