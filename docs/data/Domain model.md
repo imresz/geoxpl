@@ -34,14 +34,12 @@ is
 River
 has
 • name
-• source
+• origin
 • mouth
 • main stem
 • direction
 • tributaries
 • anabranches
-• flow direction
-• watershed
 • approximate length
 
 is

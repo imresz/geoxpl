@@ -24,4 +24,5 @@ No admin UI, command-line administration, local-only administration, or authenti
 
 Risks not yet addressed: privileged operations, credential management, rate limiting, audit logging and potentially expensive bulk jobs.
 May casue heavy workload initially.
+Add administrator-only authorization, audit logging, rate limiting and protection against overlapping bulk jobs.
 

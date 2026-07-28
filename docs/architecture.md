@@ -17,6 +17,13 @@ Search layer
      ┌───────▼────────┐
      │ Geographic API │
      └───────┬────────┘
+	 
+The Geographic API should:
+search the processed-feature catalogue;
+return feature geometry and provenance;
+create background jobs;
+return job status;
+expose authenticated administration operations.
              │
 Computational layer
 	Build the info
@@ -26,12 +33,19 @@ Computational layer
      │ Road Engine 
 	 │ NationalPark Engine
      │ Boundary Engine
-		a geometry/API engine.
+	   Geometry Assembly Service
 
      └───────┬────────┘
-             │
-			 
-			 
+	 
+	 
+	 
+The computational layer should:
+contain Road, River and National Park processors;
+assemble geometry;
+calculate extent and confidence;
+produce provenance-aware processed features.
+
+
 Search/API checks the processed-feature catalogue.
 Search/API submits slow work to the background coordinator.
 Background worker invokes the appropriate computational engine.
@@ -49,6 +63,16 @@ Background layer
 -		data source processing engine which includes
 - 		a processed-feature catalogue/cache;
 - 		an approved source registry.
+The background layer should:
+schedule work;
+execute queued jobs;
+discover candidate sources;
+import approved datasets;
+validate updates;
+call the computational processors;
+update job status.
+			 
+
 
 The background layer works with the data layer and at the completion of processing sends its output to the cache.
 
@@ -59,6 +83,16 @@ Data layer
 	 │ Open data from private data sources
 	   Cache
      └────────────────┘
+The data layer should persist:
+source registry and approvals;
+source versions and licences;
+raw and staged geographic data;
+processing jobs;
+processed features;
+provenance and transformation records.
+	 
+	 
+	 
 	 
 	 
 Aministration layer.

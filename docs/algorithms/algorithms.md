@@ -58,6 +58,6 @@ When a feature is queried
 	1. Look in cache. Present if found
 	2	a. If not found and can be quickly generated, pre-process then cache then present.
 	2	b. If not found and will require significant pre-processing, return status=queued and show a try again soon message, then in the background perform preprocessing and caching.
-	3. If cannot be pre-processed look for more raw data. and try preprocessing again. 
+	3. Search approved sources. If these are insufficient, discover candidate sources, set the internal job status to awaiting_source_approval, and resume processing only after approval.
 		
 The API returns display-ready GeoJSON and MapLibre renders it in the browser.
