@@ -1,110 +1,66 @@
 # geoxpl architecture.md
+# Logical responsibilities
 # Specify workflow
 
 
+The display layer should:
+	present the public and administration web pages;
+	use MapLibre to render the base map and GeoXpl geometry;
+	present the feature search interfae;	
+	display candidate results, featuredetails, provenance and job status.
 
-Display layer
-	UI
-		Web pages
-  		MapLibre map
-		Search interface
+The search layer should:
 
-Search layer
-    Search
-		Figure what to look for
-		Present options if unclear
+	normalise the entered feature name;
+	apply the selected feature type;
+	search names, approved aliases and route numbers;
+	rank matching candidates according to the search contract;
+	return disambiguation options when more than one feature matches;
+	determine whether an unmatched request is eligible for background processing.
 
-     ┌───────▼────────┐
-     │ Geographic API │
-     └───────┬────────┘
-	 
 The Geographic API should:
-search the processed-feature catalogue;
-return feature geometry and provenance;
-create background jobs;
-return job status;
-expose authenticated administration operations.
-             │
-Computational layer
-	Build the info
-     ┌───────▼────────┐
-     │ Search Engine  │
-     │ River Engine   │
-     │ Road Engine 
-	 │ NationalPark Engine
-     │ Boundary Engine
-	   Geometry Assembly Service
+	search the processed-feature catalogue;
+	return feature geomed administration operations.
 
-     └───────┬────────┘
-	 
-	 
-	 
 The computational layer should:
-contain Road, River and National Park processors;
-assemble geometry;
-calculate extent and confidence;
-produce provenance-aware processed features.
+	contain Road, River and National Park processors;
+	assemble geometry;
+	calculate extent and confidence;
+	produce provenance-aware processed features.
 
-
-Search/API checks the processed-feature catalogue.
-Search/API submits slow work to the background coordinator.
-Background worker invokes the appropriate computational engine.
-Engine stores the resulting processed feature.
-Worker updates the job status.
-API reads the status and result.		 
-			 
-			 
-
-Background layer
-
-	Background layer contains
-- 		a persistent job/request store;
-- 		a background worker;
--		data source processing engine which includes
-- 		a processed-feature catalogue/cache;
-- 		an approved source registry.
 The background layer should:
-schedule work;
-execute queued jobs;
-discover candidate sources;
-import approved datasets;
-validate updates;
-call the computational processors;
-update job status.
-			 
+	schedule work;
+	execute queued jobs;
+	discover candidate sources;
+	import approved datasets;
+	validate updates;
+	call the computational processors;
+	update job status.
 
+The data layer should:
+	source registry and approvals;
+	source versions and licences;
+	raw and staged geographic data;
+	processing jobs;
+	processed features;
+	provenance and transformation records.
 
-The background layer works with the data layer and at the completion of processing sends its output to the cache.
+## Request flows
 
-Data layer
-     ┌───────▼────────┐
-     │ PostGIS + OSM  │
-     │ DEM + Govt GIS
-	 │ Open data from private data sources
-	   Cache
-     └────────────────┘
-The data layer should persist:
-source registry and approvals;
-source versions and licences;
-raw and staged geographic data;
-processing jobs;
-processed features;
-provenance and transformation records.
-	 
-	 
-	 
-	 
-	 
-Aministration layer.
+Cached search:
+	Display → Geographic API → Search layer →
+	Processed-feature catalogue → Geographic API → Display
 
-Data source approval function
-Admin initiated	bulk feature processing
-	 
-	 
-Future Engines in computational layer
-     Terrain Engine
-	 Gradient Engine
-	 Surface Engine
-	 Status Engine
-	 Additional feature-specific processors;
+Uncached search:
 
+	Display → Geographic API → Job store →
+	Background worker → Computational processor →
+	Processed-feature catalogue
+
+The display checks the Geographic API for job status and retrieves
+the feature when processing reaches `ready`.
+
+Administration:
+
+	Administration page → Authenticated Geographic API →
+	Source registry or background job coordinator
