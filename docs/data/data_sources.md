@@ -85,4 +85,5 @@ calculate catchment adjacency
 link OSM features to Wikidata
 normalise names and aliases
 
-
+Display layer
+The display layer shall use MapLibre to render an OSM-derived background map. The basemap tile and style provider shall be configurable and independent of GeoXpl’s processed-feature catalogue. The MVP may use public OSM raster tiles for low-volume interactive use, subject to OSM’s attribution and tile-usage requirements. A production tile provider shall be selected before wider release.
