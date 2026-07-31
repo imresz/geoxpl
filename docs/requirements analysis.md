@@ -1,4 +1,4 @@
-# geoxpl Requirements.md
+# geoxpl Requirements analysis.md
 
 
 At a high level when I search for a geographic feature:
@@ -14,17 +14,17 @@ The data comes from
 			
 The system			
 	receieves a search query		
-	checks cached data	or	pre processes geographical features and creates cached data
+	checks stored data	or starts a process to assemble the geographical feature in the background and creates stored data
 	displays data		
-	receives feedback		
+	receives feedback	
 
 
 The system should present a web page with a search bar.
 The user can type, in plain freeform text, a geographical feature's name and also select the feature type from a drop down list.
-Upon pressing enter, the system queries its database cache of processed features and returns one or more matching results.
-The matching results are displayed as a selectable list of candidate features found in the database of cached results.
+Upon pressing enter, the system queries its database store of processed features and returns one or more matching results.
+The matching results are displayed as a selectable list of candidate features found in the database of stored or cached results.
 Two things can happen here. The user selects from the list and the feature is displayed.
-Or the user can choose the "Not found" option. The system then responds that their search entry may appear at another time and they are invited to try again later. The system notes the search outcome and queues the feature for further pre-processing. In the background, the raw data is queried for this feature and pre-processing proceeds. Once pre-processing concludes, the system updates its main database of cached results.
+Or the user can choose the "Not found" option. The system then responds that their search entry may appear at another time and they are invited to try again later. The system notes the search outcome and queues the feature for further pre-processing. In the background, the raw data is queried for this feature and pre-processing proceeds. Once pre-processing concludes, the system updates its main database of stored results.
 
 A separate sub system handles the pre-processing. Pre-processing is whereby the system attempts to identify a region extent by using osm data, wikipedia, federal, state and local government records and other sources of data identified a useful. Published processing uses approved sources only. The preprocessing can comprise specialized geographical features "engines" which support the search engine. For example the would be a rivers geography engine, a roads engine, a National Park engine etc. Each engine uses its own form of geographic rules for identifying regions. The extent of a region does not have to be exact. Provenance means the source of the info is traceable but where there is contradiction or controversy, boundaries can be estimated and a low, medium or high confidence level attached. 
 

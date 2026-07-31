@@ -1,13 +1,14 @@
 # geoxpl architecture.md
 # Logical responsibilities
+
 # Specify workflow
 
 
 The display layer should:
 	present the public and administration web pages;
 	use MapLibre to render the base map and GeoXpl geometry;
-	present the feature search interfae;	
-	display candidate results, featuredetails, provenance and job status.
+	present the feature search interface;	
+	display candidate results, feature details, provenance and job status.
 
 The search layer should:
 
@@ -20,7 +21,10 @@ The search layer should:
 
 The Geographic API should:
 	search the processed-feature catalogue;
-	return feature geomed administration operations.
+	return feature geometry and provenance;
+	create or reuse background jobs;
+	return job status;
+	expose authenticated administration operations.
 
 The computational layer should:
 	contain Road, River and National Park processors;
@@ -46,6 +50,7 @@ The data layer should:
 	provenance and transformation records.
 
 ## Request flows
+
 
 Cached search:
 	Display → Geographic API → Search layer →

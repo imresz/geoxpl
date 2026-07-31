@@ -3,10 +3,10 @@
 
 
 Search results should display feature name, type and a measure of size, say length, area, height.
-If nothing is cached, then the search result should state this and provide an option to search. If this feature has already been searched for then return its current status and the option to start a fresh query.
+If nothing is stored in Processed-feature catalogue, then the search result should note the status. If the status is failed or unavailable then the option to start a fresh query shhould be given.
 
 The search bar should consist of a text box to enter the name and drop list of features.
-Searching “Murray River” and choosing the river item from the drop down lst, returns cached rivers whose names or aliases match the query. Results are ranked by exact name match and relevance to Victoria. Each candidate includes its name, feature type, locality and summary extent. If no suitable candidate exists, the user may request background processing. The request returns one of the following statuses:
+Searching “Murray River” and choosing the river item from the drop down lst, returns stored rivers whose names or aliases match the query. Results are ranked by exact name match and relevance to Victoria. Each candidate includes its name, feature type, locality and summary extent. If no suitable candidate exists, the user may request background processing. The request returns one of the following statuses:
 -	queued.	Accepted but not started.
 -	processing.	Background processing is running.
 -	awaiting_source_approval. For internal use. Public search return status = processing.

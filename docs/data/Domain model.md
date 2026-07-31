@@ -38,8 +38,6 @@ has
 • mouth
 • main stem
 • direction
-• tributaries
-• anabranches
 • approximate length
 
 is

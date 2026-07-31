@@ -39,9 +39,9 @@ Query-time analysis
 When the user searches for a feature, the system performs only the feature-specific work.
 
 
-For features outside the Victorian test area, return out_of_scope.
+An MVP feature is in scope when its authoritative or defensibly derived geometry intersects Victoria. Once eligible, GeoXpl processes and displays its complete defensible extent, including portions outside Victoria.
 
-The search engine queries cached data and or calls the required feature engines following the search contract to return a status and if available a result.
+The search engine queries the data Processed-feature catalogue and or calls the required feature engines following the search contract to return a status and if available a result.
 
 The engine(s) are called to do the following:
 
@@ -55,7 +55,7 @@ The engine(s) are called to do the following:
 	
 
 When a feature is queried
-	1. Look in cache. Present if found
+	1. Look in cache or Processed-feature catalogue. Present if found
 	2	a. If not found and can be quickly generated, pre-process then cache then present.
 	2	b. If not found and will require significant pre-processing, return status=queued and show a try again soon message, then in the background perform preprocessing and caching.
 	3. Search approved sources. If these are insufficient, discover candidate sources, set the internal job status to awaiting_source_approval, and resume processing only after approval.

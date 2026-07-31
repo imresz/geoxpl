@@ -1,4 +1,4 @@
-# geoxpl ui-principple.md
+# geoxpl ui-principles.md
 #Specify look and feel
 
 Present a web page with a search bar for free-form text entry and also a drop-down list of geographic featured. The initial map should be centred on Victorian and include surrounding regions as necessay to display a feature. 

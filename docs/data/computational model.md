@@ -4,12 +4,17 @@
 
 River
 
-Represent a river as a directed graph. Use graph traversal to identify the main stem and calculate the longest upstream path.
+Represent a river as a directed graph. Use graph traversal to identify the main stem source-to-mouth and calculate the longest upstream path.
 
 Road
 
 Represent a road as single or double solid line.
 Include a route number if known.
+
+Route
+
+Represent a route as a single or double solid line
+A route is made of one or more roads.
 Show all roads from a route number.
 
 NationalPark

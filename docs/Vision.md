@@ -8,7 +8,9 @@ Additional information is also available such as gradient and topography, surfac
 Examples of the results the app should show are:
 Roads identified by name highlighted end-to-end.
 Routes identified by name or route number highlighted end-to-end.
-Rivers highlighted source-to-mouth.
+Rivers highlighted as main stem source-to-mouth, with named anabranches represented separately
+
+
 Regions identified by name and the extend identified even if only approximately
 Mountain ranges displaying approximate boundaries.
 Topography if available.
