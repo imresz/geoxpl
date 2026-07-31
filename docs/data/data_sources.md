@@ -8,16 +8,26 @@ Digital elevation models
 Catchments and drainage basins
 Government landform datasets.
 Wikidata and geographic names
-Victoria data
-Victorian road names and geometry: https://services-ap1.arcgis.com/P744lA0wf4LlBZ84/arcgis/rest/services/Vicmap_Address/FeatureServer
-Victorian river names and geometry: https://services-ap1.arcgis.com/P744lA0wf4LlBZ84/arcgis/rest/services/Vicmap_Hydro/FeatureServer
-Victorian National Park boundaries: https://services-ap1.arcgis.com/P744lA0wf4LlBZ84/arcgis/rest/services/Vicmap_Geomark/FeatureServer
+Victoria datahttps://discover.data.vic.gov.au/dataset/vicmap-transport-rest-api
+Victorian road names and geometry:
+https://services-ap1.arcgis.com/P744lA0wf4LlBZ84/ArcGIS/rest/services/Vicmap_Transport/FeatureServer/1
 
-SA water courses: https://data.sa.gov.au/data/dataset/00f1ac6c-0b3d-4611-8f58-ff942800d4c2
+Victorian river names and geometry: https://services-ap1.arcgis.com/P744lA0wf4LlBZ84/arcgis/rest/services/Vicmap_Hydro/FeatureServer
+
+Victorian National Park boundaries:
+https://discover.data.vic.gov.au/dataset/parks-and-conservation-reserves-parkres
+
+
+SA water courses: https://location.sa.gov.au/lms/Reports/ReportMetadata.aspx?p_no=903&pu=y
+
+
 SA road names: https://data.sa.gov.au/data/dataset/4cc17ac3-ce49-4525-971b-6122023b8937
 
-NSW water courses: https://www.water.nsw.gov.au/our-work/science-data-and-modelling/maps/hydrogeological-maps
-NSW roads: https://opendata.transport.nsw.gov.au/dataset/road-segment-data-from-datansw
+NSW water courses: https://datasets.seed.nsw.gov.au/dataset/nsw-hydrography/access_data
+
+
+
+NSW roads: https://portal.spatial.nsw.gov.au/server/rest/services/NSW_Transport_Theme_multiCRS/FeatureServer
 
 
 
