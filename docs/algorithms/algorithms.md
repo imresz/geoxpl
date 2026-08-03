@@ -14,11 +14,6 @@ Query-time feature analysis
 Cached result
       ↓
 
-
-
-
-
-
 Preprocessed data
 
 	This is where expensive general-purpose work is done ahead of time:
