@@ -33,8 +33,7 @@ Query-time analysis
 
 When the user searches for a feature, the system performs only the feature-specific work.
 
-
-An MVP feature is in scope when its authoritative or defensibly derived geometry intersects Victoria. Once eligible, GeoXpl processes and displays its complete defensible extent, including portions outside Victoria.
+The feature should lie within the scope. The system may still need to be perform some processing to determine this.
 
 The search engine queries the data Processed-feature catalogue and or calls the required feature engines following the search contract to return a status and if available a result.
 

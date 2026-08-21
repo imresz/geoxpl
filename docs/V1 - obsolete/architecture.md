@@ -30,6 +30,7 @@ The computational layer should:
 	contain Road, River and National Park processors;
 	assemble geometry;
 	calculate extent and confidence;
+	determine if the feature is within scope;
 	produce provenance-aware processed features.
 
 The background layer should:

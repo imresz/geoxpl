@@ -40,12 +40,13 @@ has
 • direction
 • approximate length
 
+
 is
 • a directed network
 • may flow through lakes
 • may have multiple headwaters
 • may change names
-
+• may have named anabranches
 
 Mountain
 has
