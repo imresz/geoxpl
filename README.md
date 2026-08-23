@@ -1,2 +1,0 @@
-# geoxpl
-Geography Exploration Tool
