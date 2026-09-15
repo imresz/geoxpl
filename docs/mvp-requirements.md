@@ -32,23 +32,43 @@ extent**.
 
 ## Search
 
-Free-text search must use canonical names and aliases, return
-river/valley candidates intersecting Victoria, provide
+Free-text search must use case insensitive names and a feature type chosen from a drop down list. List currently contains two item: rive and valley.
+
+Return river/valley candidates intersecting Victoria, provide
 locality/catchment context for duplicate names, never silently choose a
 materially ambiguous result, and resolve selection to a stable
 application feature ID independent of source IDs.
 
 ## First-query behaviour
 
-Use **cache first, derive on demand**: 1. resolve; 2. check current
-cache; 3. return cache if current; 4. otherwise run feature processor;
-5. cache success; 6. if work exceeds interactive budget, return approved
-provisional geometry if available and queue deeper processing; 7. never
-fabricate geometry/endpoints.
+                    SEARCH
+                      │
+                      ▼
+               Resolve feature
+                      │
+                      ▼
+              FEATURE CATALOGUE
+                 │          │
+              EXISTS     ABSENT
+                 │          │
+                 ▼          ▼
+              Display    Create job
+                            │
+                            ▼
+                     Background Worker
+                            │
+                   ┌────────┴────────┐
+                   ▼                 ▼
+             River Processor   Valley Processor
+                   │                 │
+                   └────────┬────────┘
+                            ▼
+                    FEATURE CATALOGUE
+                            │
+                            ▼
+                          Display
 
-Targets after warm-up: candidate search p95 \<1 s; cached result p95 \<1
-s; uncached river target \<5 s with 10 s synchronous ceiling; valley
-work exceeding 10 s becomes a background job.
+First-time derivation must not block the interactive request. All uncatalogued features are submitted to the background processing system.
 
 ## Map
 
@@ -65,7 +85,7 @@ not invent numeric confidence before calibration.
 
 ## Administrator
 
-Admin can inspect sources/logs, invalidate/rerun cache, mark manual
+Admin can inspect sources/logs, invalidate/rerun feature catalogue, mark manual
 review, disable bad source objects, apply/remove documented overrides
 without altering raw data, inspect versions, trigger/monitor imports and
 failed jobs. Overrides record actor, timestamp, reason, superseded
@@ -89,5 +109,5 @@ cadastral claims or native mobile app.
 Test at least: VIC-only river; river extending into NSW; eligible
 feature extending into SA; duplicate names; river through lake/reservoir
 or data gap; valley with approved polygon; terrain-derived valley;
-low-confidence valley; no defensible result; stale cache after
+low-confidence valley; no defensible result; stale feature catalogue after
 source/algorithm change.

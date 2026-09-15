@@ -38,8 +38,7 @@ for watercourse geometry, hydrographic context and network
 corroboration. Do not assume one source feature equals one application
 river.
 
-Product page:
-`https://www.land.vic.gov.au/maps-and-spatial/spatial-data/vicmap-catalogue/vicmap-hydro`
+Victorian river names and geometry: https://services-ap1.arcgis.com/P744lA0wf4LlBZ84/arcgis/rest/services/Vicmap_Hydro/FeatureServer
 
 ## Geoscience Australia
 
@@ -50,20 +49,20 @@ exceptions/third-party material; still verify and retain each product's
 metadata/licence.
 
 Use approved elevation products for valley terrain preprocessing.
+https://services.ga.gov.au/
 
 Copyright/licence: `https://www.ga.gov.au/copyright`
 
 ## NSW and South Australia
 
 Cross-border data is required only to complete features intersecting
-Victoria. Before production use, select and document authoritative/open
-hydrographic and terrain datasets for each state, including exact
-product version, licence, attribution, schema mapping and update
-process.
+Victoria. 
 
-Until that review is completed, OSM plus approved national datasets may
-provide cross-border continuity, but results must expose source
-limitations.
+SA water courses: https://location.sa.gov.au/lms/Reports/ReportMetadata.aspx?p_no=903&pu=yBefore 
+
+
+NSW water courses:
+https://datasets.seed.nsw.gov.au/dataset/nsw-hydrography/access_data
 
 **Codex must not invent a NSW or SA dataset name/licence.** Add one only
 after verified source review.

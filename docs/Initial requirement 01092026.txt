@@ -1,0 +1,176 @@
+1. I want to know:			
+	the shape or extent of a geographical feature on an interactive map;		
+	routing if geometry is composed of lines;		
+	extent if geometry is spatial;
+	
+			
+2. The data comes from	,
+	government sources,	
+	open-source sources.	
+	private sources with public access.
+
+	
+3.	A store of data sources is maintained by the system. The data sources will have statuses such as approved, rejected or pending. 
+	
+4.	A store of geographic features is maintained by the system. The features will have one of many statuses defined below after AI processing. The geometry of the geographic features will be stored here. Here is some more proposed info to keep in the features-store:
+	Feature
+		UUID
+		type
+		canonical name
+		aliases
+
+	Derived geometry
+
+	River:
+		main stem
+		source
+		mouth
+
+	Valley:
+		approximate extent
+		principal drainage
+
+	Derivation
+		processor
+		algorithm version
+		created date
+
+	Evidence
+		source datasets
+		source object IDs
+		source versions
+
+	Quality
+		confidence. Officially specified shape and extent or derived from various sources or mixed sources
+		warnings
+		status
+	
+	
+5. Workflow of system
+			
+The system:		
+A	receives a search query	and determines what the user is asking about.
+B	checks if the feature is already identified and stored. Follow the steps as per system response below.
+C	If the feature is not already and can be readily identified from existing data sources within 5 seconds display the data and store the fature.
+D	If the feature cannot be readily identified from existing data sources or is taking longer than 5 seconds display a message to
+	invite the user to retry later. Future searches for this feature should show either status pending or the feature if it has been resolved.
+E	The background process continues identifying the new feature, gathering the display information and stores the result.
+F	If the background process cannot identify the feature from existing data sources, an AI process is started to search for missing data and other missing capability in the feature processing and a report containing recommended next steps is produced for the administrator to approve and/or modify.
+
+
+6. The logical components of the system include:
+
+A.	User interface display system including map and feature rendering.		
+
+B.	Search processor to determine what the feature is and which feature processor to call to either fetch or build the geometry. If the query is ambiguous, the search processor can present a list of discovered features for the user to select.
+
+C.	Geographical feature processors such as a River Processor, a Valley Processor to determine the geometry of the feature.		
+
+D.	AI researching processor. This process is started when there is no stored feature found and there is no active or pending discovery in place. This process can: search for datasets, read documentation, identify likely aliases, compare source descriptions, identify missing processing capability, recommend administrator action.
+
+	Here is a proposed workflow for administering the the AI processing:
+	AI RECOMMENDATION
+        ↓
+	PENDING REVIEW
+		↓          ↘
+	APPROVED     REJECTED
+		↓
+	IMPORT / IMPLEMENT
+		↓
+	RETRY FEATURE
+		↓
+	RESOLVED 
+	Successfully or report feature unable to be resolved
+
+E.	Data importer process to retrieve the necessary information to identify the geographic feature.
+
+F.	Password protected, administration sub-system. The administration process produces reports on usage, resolved vs unresolveed queries, Data ingestion approval. AI processing approval. Following approval, the AI process completes the steps necessary to produce the geometry of a finalised stored feature. The final outcomes can be: resolved, partially resolved, ambiguous, insufficient_data, missing_capability, failed. For the non-reolved features, a recommendation for further action could be offered. There should be a rate limiting feature on the use of AI process.
+
+
+7. The user experience			
+1	The user sees a search box accepting plain text at the top of the screen. No autocomplete yet and the text is treated
+	as case-insensitive.		
+2	Next to the text box, there is a drop down list of geographical features. The list contains: River, Valley and the user must
+	choose one. Next to the drop down list is the search button.		
+	After the search button is clicked, feature processing takes place. This could take a short or a long time. If a response can be generated for a new feature within say 5 secs, the feature can be displayed on an interactive map showing the usual map controls and the feature overlayed. In this scenario, the path or extend would not be uncertain, the feature would be saved into the catalogue of processed features. There would still be some feedback to the user that processing is occurring in the interim. If the feature could not be processed and displayed within 5 secs then the user should be advised that they should try again later. Feature processing would continue in the background. I don't want to complicate this part because we know we are searching for the Murray River, but try not to hard-code the outcome too much and allow for more feature names and types.		
+	
+System response	
+	Search submitted		
+	      ↓		
+	Existing processed feature?		
+	  Yes → display immediately. Finish.	
+		↓
+	No Feature Catalogue entry
+		↓
+	START BACKGROUND JOB immediately
+		↓
+	UI watches job for up to 5 seconds
+			│
+		┌───┴────┐
+	complete   still running
+		│          │
+	display      tell user
+	feature      "processing continues"
+
+
+8. Data provenance:
+The system should keep information which identifies why the feature was stored the way it was. The purpose of this is to figure out the cause if the feature is incorrectly displayed.
+
+9. Architecture
+
+                         USER
+                           │
+                           ▼
+                    SEARCH RESOLVER
+                           │
+                           ▼
+                    FEATURE CATALOGUE
+                      │          │
+                    FOUND      ABSENT
+                      │          │
+                      ▼          ▼
+                   DISPLAY   JOB MANAGER
+                                 │
+                      ┌──────────┴──────────┐
+                      ▼                     ▼
+               RIVER PROCESSOR       VALLEY PROCESSOR
+                      │                     │
+                      └──────────┬──────────┘
+                                 │
+                         Approved data
+                                 │
+                                 ▼
+                        SOURCE DATA STORE
+                                 │
+                    ┌────────────┴────────────┐
+                    │                         │
+                 RESOLVED              CANNOT RESOLVE
+                    │                         │
+                    ▼                         ▼
+            FEATURE CATALOGUE          AI RESEARCH
+                                              │
+                                              ▼
+                                       Recommendations
+                                              │
+                                              ▼
+                                        SOURCE REGISTRY
+                                              │
+                                              ▼
+                                         ADMIN REVIEW
+                                              │
+                                      approved
+											  │
+                                              ▼
+                                         DATA IMPORTER
+                                              │
+                                              ▼
+                                       SOURCE DATA STORE
+                                              │
+                                              ▼
+                                         RETRY JOB
+										 
+10. Initial scope:
+	Victoria and areas of New South Wales and South Australia as far as the geopgraphical feature extends.
+	Rivers and Valleys in Victoria.
+	Initially only the software and IT infrastructure is built. The first query for a river or valley should trigger the full lifecycle of identifying and processing a geographical feature, the required data sources, the approval process and the storage of the feature.
+	The test feature is the Murray River.

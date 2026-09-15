@@ -1,4 +1,4 @@
-# Victorian River & Valley Explorer --- Documentation Index
+# GeoXpl --- Documentation Index
 
 This directory is the normative MVP specification.
 
@@ -8,8 +8,7 @@ extends.
 
 -   `mvp-requirements.md` --- user/admin capabilities and acceptance
     criteria.
--   `geographic-processing.md` --- production of river and valley
-    geometries.
+-   `geographic-processing.md` --- production of geometries of geographical features.
 -   `architecture.md` --- components and information flows.
 -   `data-sources.md` --- approved datasets, licences and source rules.
 -   `development.md` --- technology choices, standards and Codex rules.
