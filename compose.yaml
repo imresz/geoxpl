@@ -1,0 +1,22 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4173:4173"
+    environment:
+      HOST: 0.0.0.0
+      ALLOW_ADMIN_SETUP: "false"
+      SECURE_COOKIES: ${SECURE_COOKIES:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      AI_REQUESTS_PER_HOUR: ${AI_REQUESTS_PER_HOUR:-3}
+    volumes:
+      - geoxpl-data:/app/runtime
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+  geoxpl-data:

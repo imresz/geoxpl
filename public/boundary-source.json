@@ -1,0 +1,9 @@
+{
+  "publisher": "geoBoundaries / William & Mary geoLab",
+  "source": "https://www.geoboundaries.org/api/current/gbOpen/AUS/ADM1/",
+  "download": "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/AUS/ADM1/geoBoundaries-AUS-ADM1_simplified.geojson",
+  "boundaryId": "AUS-ADM1-82085004",
+  "licence": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+  "retrieved": "2026-09-16T01:26:23.087Z",
+  "usage": "Simplified state outline and prototype geographic eligibility. Not a cadastral boundary."
+}

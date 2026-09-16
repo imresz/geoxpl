@@ -1,0 +1,14 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+const endpoint = 'https://www.geoboundaries.org/api/current/gbOpen/AUS/ADM1/';
+const response = await fetch(endpoint);
+if (!response.ok) throw new Error(`Boundary catalogue HTTP ${response.status}`);
+const metadata = await response.json();
+const dataResponse = await fetch(metadata.simplifiedGeometryGeoJSON);
+if (!dataResponse.ok) throw new Error(`Boundary download HTTP ${dataResponse.status}`);
+const collection = await dataResponse.json();
+const victoria = collection.features.find(f => f.properties.shapeName === 'Victoria');
+if (!victoria) throw new Error('Victoria not found in the boundary dataset.');
+mkdirSync('public', { recursive: true });
+writeFileSync('public/victoria.geojson', JSON.stringify(victoria));
+writeFileSync('public/boundary-source.json', JSON.stringify({ publisher: 'geoBoundaries / William & Mary geoLab', source: endpoint, download: metadata.simplifiedGeometryGeoJSON, boundaryId: metadata.boundaryID, licence: metadata.boundaryLicense, retrieved: new Date().toISOString(), usage: 'Simplified state outline and prototype geographic eligibility. Not a cadastral boundary.' }, null, 2));
+console.log('Victoria boundary downloaded with provenance.');

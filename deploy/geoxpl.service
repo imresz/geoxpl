@@ -1,0 +1,24 @@
+[Unit]
+Description=GeoXpl application and background worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=geoxpl
+Group=geoxpl
+WorkingDirectory=/opt/geoxpl
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=ALLOW_ADMIN_SETUP=false
+ExecStart=/usr/bin/node --env-file-if-exists=/opt/geoxpl/.env /opt/geoxpl/server/index.js --production
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/geoxpl/runtime
+
+[Install]
+WantedBy=multi-user.target
