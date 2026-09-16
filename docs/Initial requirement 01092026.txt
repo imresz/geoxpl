@@ -1,3 +1,6 @@
+#Initial requirement 01092026.txt
+#
+
 1. I want to know:			
 	the shape or extent of a geographical feature on an interactive map;		
 	routing if geometry is composed of lines;		
