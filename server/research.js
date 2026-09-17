@@ -18,7 +18,7 @@ const reportJsonSchema = z.toJSONSchema(reportSchema, {
 });
 export const aiConfigured = () => !!(process.env.OPENAI_API_KEY && process.env.OPENAI_MODEL);
 
-export async function research(job, store, reason) {
+export async function research(job, store, reason, diagnostics = {}) {
   if (!aiConfigured()) {
     const candidates = [], evidence = [];
     if (job.type === 'river') {
@@ -40,7 +40,7 @@ export async function research(job, store, reason) {
   const used = store.db.prepare('SELECT COUNT(*) AS n FROM ai_calls WHERE created>?').get(Date.now() - 3600000).n;
   if (used >= limit) return { provider: 'rate limit', summary: 'The hourly AI research limit has been reached.', nextSteps: ['Retry from administration after the hourly limit resets.'], evidence: [], candidates: [] };
   store.db.prepare('INSERT INTO ai_calls(created) VALUES(?)').run(Date.now());
-  const input = JSON.stringify({ query: job.query, featureType: job.type, unresolvedReason: reason, knownSources: store.sources().map(s => ({ name: s.name, url: s.url, status: s.status })) });
+  const input = JSON.stringify({ query: job.query, featureType: job.type, unresolvedReason: reason, processingEvidence: diagnostics, knownSources: store.sources().map(s => ({ name: s.name, url: s.url, status: s.status })) });
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST', signal: AbortSignal.timeout(120000),
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
@@ -59,5 +59,5 @@ export async function research(job, store, reason) {
   const payload = await response.json();
   if (payload.status !== 'completed') throw new Error('AI research did not complete.');
   const output = payload.output.flatMap(o => o.content || []).filter(c => c.type === 'output_text').map(c => c.text).join('');
-  return { ...reportSchema.parse(JSON.parse(output)), provider: 'OpenAI web research', model: process.env.OPENAI_MODEL, responseId: payload.id, promptVersion: 'research/1', request: JSON.parse(input) };
+  return { ...reportSchema.parse(JSON.parse(output)), provider: 'OpenAI web research', model: process.env.OPENAI_MODEL, responseId: payload.id, promptVersion: 'research/2', request: JSON.parse(input) };
 }

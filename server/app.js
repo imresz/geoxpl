@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { scryptSync, randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { sourceSchema, aiConfigured } from './research.js';
+import { normalize } from './store.js';
 
 export function createApp(store, config = {}) {
   const app = express(); app.disable('x-powered-by');
@@ -60,7 +61,7 @@ export function createApp(store, config = {}) {
   });
   app.post('/api/admin/logout', requireAdmin, (req, res) => { const token = tokenFrom(req); store.db.prepare('DELETE FROM sessions WHERE token=?').run(createHash('sha256').update(token).digest('hex')); res.clearCookie('geoxpl_session', { path: '/' }); res.json({ ok: true }); });
   app.use('/api/admin', requireAdmin);
-  app.get('/api/admin/overview', (_req, res) => res.json({ jobs: store.jobs(), sources: store.sources(), reports: store.reports(), features: store.features().map(({ geometry, ...f }) => f), events: store.db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT 100').all(), searches: store.db.prepare('SELECT COUNT(*) AS count FROM searches').get().count, imports: store.db.prepare('SELECT id,source_id,job_id,created,checksum FROM imports ORDER BY created DESC LIMIT 100').all(), aiConfigured: aiConfigured(), aiHourlyLimit: Math.max(1, Math.min(30, Number(process.env.AI_REQUESTS_PER_HOUR) || 3)) }));
+  app.get('/api/admin/overview', (_req, res) => res.json({ jobs: store.jobs().map(j => ({ ...j, settings: store.featureSettings(j.id) })), sources: store.sources(), reports: store.reports(), features: store.features().map(({ geometry, ...f }) => f), events: store.db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT 100').all(), searches: store.db.prepare('SELECT COUNT(*) AS count FROM searches').get().count, imports: store.db.prepare('SELECT id,source_id,job_id,created,checksum FROM imports ORDER BY created DESC LIMIT 100').all(), aiConfigured: aiConfigured(), aiHourlyLimit: Math.max(1, Math.min(30, Number(process.env.AI_REQUESTS_PER_HOUR) || 3)) }));
   app.post('/api/admin/sources', (req, res) => res.status(201).json({ id: store.addSource(sourceSchema.parse(req.body)) }));
   app.patch('/api/admin/sources/:id', (req, res) => {
     const old = store.sources().find(s => s.id === req.params.id); if (!old) return res.status(404).json({ error: 'Source not found.' });
@@ -68,6 +69,7 @@ export function createApp(store, config = {}) {
     const newStatus = z.enum(['pending', 'approved', 'rejected']).parse(status);
     const source = sourceSchema.parse(body);
     if (newStatus === 'approved' && (!source.licence.trim() || !source.attribution.trim())) return res.status(400).json({ error: 'Verified licence and attribution are required for approval.' });
+    if (newStatus === old.status && JSON.stringify(sourceSchema.parse(old)) === JSON.stringify(source)) return res.json({ ok: true, unchanged: true });
     store.decideSource(old.id, newStatus, source);
     for (const f of store.features().filter(f => f.evidence.some(e => e.sourceId === old.id))) {
       f.status = 'partially_resolved'; f.warnings = [...f.warnings, 'Source configuration or approval changed. Reprocessing required.'];
@@ -83,14 +85,30 @@ export function createApp(store, config = {}) {
     if (['queued', 'importing', 'processing', 'researching'].includes(j.phase)) return res.json(viewJob(j));
     res.json(viewJob(store.retry(j.id)));
   });
+  app.patch('/api/admin/jobs/:id/settings', (req, res) => {
+    const job = store.getJob(req.params.id); if (!job) return res.status(404).json({ error: 'Job not found.' });
+    if (['queued', 'importing', 'processing', 'researching'].includes(job.phase)) return res.status(409).json({ error: 'Wait for the active attempt to finish before changing feature settings.' });
+    const settings = z.object({ aliases: z.array(z.string().trim().min(2).max(150)).max(20), preferredSourceId: z.string().nullable() }).parse(req.body);
+    settings.aliases = [...new Set(settings.aliases.map(normalize))].filter(a => a !== job.normalized).sort();
+    if (settings.preferredSourceId && !store.sources().some(s => s.id === settings.preferredSourceId && s.type === job.type && s.status === 'approved')) return res.status(400).json({ error: 'Select an approved source of the same feature type.' });
+    if (JSON.stringify(settings) === JSON.stringify(store.featureSettings(job.id))) return res.json({ ok: true, unchanged: true });
+    store.setFeatureSettings(job.id, settings);
+    store.invalidateFeature(job.id, 'Feature identity or source selection changed. Reprocessing required.');
+    store.retry(job.id); res.json({ ok: true });
+  });
+  app.post('/api/admin/jobs/:id/research', (req, res) => {
+    const job = store.getJob(req.params.id); if (!job) return res.status(404).json({ error: 'Job not found.' });
+    if (['queued', 'importing', 'processing', 'researching'].includes(job.phase)) return res.status(409).json({ error: 'A processing attempt is already active.' });
+    store.setting(`research:${job.id}`, 'true');
+    store.event(job.id, 'research_requested', 'Administrator requested fresh research');
+    res.json(viewJob(store.retry(job.id)));
+  });
   app.patch('/api/admin/reports/:id', (req, res) => {
     const input = z.object({ status: z.enum(['approved', 'rejected']), notes: z.string().max(4000) }).parse(req.body);
     const report = store.db.prepare('SELECT * FROM reports WHERE id=?').get(req.params.id); if (!report) return res.status(404).json({ error: 'Report not found.' });
     const data = { ...JSON.parse(report.data), adminNotes: input.notes, reviewed: new Date().toISOString() };
     store.db.prepare('UPDATE reports SET data=?,status=? WHERE id=?').run(JSON.stringify(data), input.status, report.id);
     store.event(report.job_id, `research_${input.status}`, input.notes || 'Administrator reviewed recommendation');
-    if (input.status === 'approved') { const j = store.getJob(report.job_id); if (!['queued','importing','processing','researching'].includes(j.phase)) store.retry(j.id); }
-    else store.updateJob(report.job_id, 'insufficient_data', 'completed', 'No approved path to resolve this feature.');
     res.json({ ok: true });
   });
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Unknown API endpoint.' }));

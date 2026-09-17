@@ -10,13 +10,17 @@ GeoXpl opens on a map of southeastern Australia. Enter a feature name, select **
 - Persistent feature catalogue, jobs, research reports, source registry, usage counts and audit events in SQLite.
 - Password-protected administration at `/admin`, with source and research approval/rejection, editable source settings, job retry and processing activity.
 - Named-feature import from approved ArcGIS layers and HTTPS GeoJSON collections. Raw import snapshots, checksums, source IDs and derivation history are retained.
-- Conservative river segment assembly, duplicate-line removal, connectivity and branch checks; published valley polygon import.
+- Per-feature approved aliases and source selection; conservative river identity, connectivity and branch checks; published valley polygon import.
 - Optional OpenAI web research producing structured recommendations and candidate sources. AI calls are rate limited. New sources require separate approval.
 - Without AI credentials, the worker produces an explicit configuration report. For rivers it can inspect a known official Vicmap Hydro catalogue entry and propose it for review. This is a catalogue lookup, not AI research.
 
 ## Current limits
 
-This is a local pilot, not yet a general geographic inference engine. It does not invent missing geometry. It does not yet implement terrain-derived valleys, automated cross-border main-stem adjudication, flow direction inference, or interactive selection between distinct same-named features. Disconnected or branching networks and multiple matching valley polygons remain partial for review. Source and mouth are left unset until evidence establishes their meaning. Line geometry means a feature's path, not turn-by-turn navigation.
+This is a local pilot, not yet a general geographic inference engine. It does not invent missing geometry. It does not yet implement terrain-derived valleys, automated main-stem adjudication, flow direction inference, or interactive selection between distinct same-named features within the pilot region. Disconnected or branching networks and multiple matching valley polygons remain partial for review. Source and mouth are left unset until evidence establishes their meaning. Line geometry means a feature's path, not turn-by-turn navigation.
+
+Each source is processed independently. River components must intersect Victoria or its 2 km border tolerance; connected reaches are retained beyond the border, not clipped. Additional components within 100 metres of selected endpoints can be associated as possible continuations, but their gaps remain unchanged and the result stays partial. Remote disconnected namesakes are excluded. Identity decisions and excluded-record counts are retained in the feature's processing evidence. This is conservative eligibility checking, not proof of river identity or completeness.
+
+Only one dataset supplies a feature's displayed geometry and length. Automatic selection prefers a resolved candidate, then the candidate with the widest geographic span. Administration can override this per feature. Other sources remain comparisons; overlapping national and regional representations are never added together. A failed comparison download does not invalidate a complete result from a different selected source. A failed explicitly selected source does not silently fall back to another dataset.
 
 Only a connected, unbranched river path or a single valid polygon from a source explicitly reviewed as supplying complete named features can be published as resolved. Partial geometry is stored and can be inspected by choosing **View available geometry**; it is never automatically shown as a complete feature. Do not mark a regional river dataset complete merely to bypass this check. A first Murray River search may need several approved datasets and further processing capability before a full result is possible.
 
@@ -63,10 +67,12 @@ AI receives the feature name/type, processing gaps and registered source metadat
 3. Open `/admin`, inspect **Research**, then **Source registry**.
 4. Review a candidate or add a source. Provide a specific ArcGIS layer URL ending in its numeric layer ID, or an HTTPS WGS84 GeoJSON FeatureCollection; configure its name and object-ID fields.
 5. Verify and enter licence and attribution. Leave completeness as partial/unknown unless the source actually supplies entire named features. Approve the source.
-6. Approval queues relevant waiting requests. Inspect imports and outcomes under **Requests** and **Activity**. Approving a research report is separate from approving its sources.
+6. Changed source approvals queue relevant waiting requests. Under **Requests**, open the feature-settings control to approve feature-specific aliases and optionally choose the geometry source. Saving changed settings queues processing. Suggested aliases come from that feature's research reports, not from global source aliases.
 7. Repeat the original search. A resolved result is displayed and fitted on the map; incomplete work remains pending or partial.
 
-Imports use exact case-insensitive name matching. Research may suggest aliases, but automatic alias mapping is not implemented. Sources must use public HTTPS addresses; private network URLs, redirects and oversized responses are rejected. ArcGIS imports paginate by object IDs and are limited to 25,000 records per request; GeoJSON responses are limited to 20 MB. Import limits and unsupported formats produce reviewable failures.
+**Mark reviewed** records a research decision only; it does not execute recommendations or retry the job. Rejecting a report also leaves the current job and feature intact. **Retry** checks the sources again, but reuses successful research when the input checksums, selected sources, aliases, algorithm and processing diagnostics are unchanged. Unchanged raw snapshots are reused rather than stored again. The separate **New research** control requests a fresh report and confirms possible API charges. Implementing a missing algorithm still requires development work. Source approval remains separate.
+
+Imports use exact case-insensitive matching of the submitted name and approved aliases for that feature. Sources must use public HTTPS addresses; private network URLs, redirects and oversized responses are rejected. ArcGIS imports union object IDs across names and retrieve at most 100 records per batch, shortening batches further to keep request URLs within 1,800 characters. Imports are limited to 25,000 records; GeoJSON responses are limited to 20 MB. Import limits and unsupported formats produce reviewable failures.
 
 ## Ubuntu deployment with Docker Compose
 
@@ -116,7 +122,7 @@ The service file assumes Node is `/usr/bin/node`. Check `command -v node` and ad
 
 Stop the single app instance before a filesystem backup; copy the entire `runtime` directory, not just one live SQLite file. For Docker, stop the service and back up the named volume with your normal Docker-volume backup procedure. Back up `.env` separately in a secure location.
 
-After updating code, run `npm ci`, `npm test` and `npm run build`, then restart the systemd service; or use `docker compose up -d --build`. This initial schema is created automatically; future schema changes need explicit migrations. Source approval changes invalidate dependent published features and retain prior derivations/import snapshots.
+After updating code, run `npm ci`, `npm test` and `npm run build`, then restart the systemd service; or use `docker compose up -d --build`. The additive `feature_settings` table is created automatically on startup without changing existing source approvals, reports or imports. Reprocess older features to apply the source-selection and identity checks. Source approval changes invalidate dependent published features and retain prior derivations/import snapshots.
 
 ## Structure and checks
 

@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto';
 import { publicJson } from './network.js';
 import { normalize } from './store.js';
 
-export async function importSource(source, query, load = publicJson) {
+export async function importSource(source, query, load = publicJson, identity = {}) {
   if (source.status !== 'approved') throw new Error('Source is not approved.');
-  const terms = [query];
+  const terms = [...new Set([query, ...(identity.aliases || [])].map(normalize))];
   let records = [], metadata = {}, truncated = false;
   if (source.format === 'arcgis') {
     const base = source.url.replace(/\/$/, '');
@@ -12,19 +12,32 @@ export async function importSource(source, query, load = publicJson) {
     metadata = await load(`${base}?f=json`);
     if (metadata.error) throw new Error(metadata.error.message);
     if (!metadata.fields?.some(f => f.name === source.nameField)) throw new Error(`Name field ${source.nameField} was not found in the source schema.`);
-    const literals = terms.map(t => `'${t.toUpperCase().replaceAll("'", "''")}'`).join(',');
-    const params = new URLSearchParams({ f: 'json', where: `UPPER(${source.nameField}) IN (${literals})`, returnIdsOnly: 'true' });
-    const idsResult = await load(`${base}/query?${params}`);
-    if (idsResult.error) throw new Error(idsResult.error.message);
-    const ids = idsResult.objectIds || [];
+    const matchedIds = new Set();
+    for (const term of terms) {
+      const literal = `'${term.toUpperCase().replaceAll("'", "''")}'`;
+      const params = new URLSearchParams({ f: 'json', where: `UPPER(${source.nameField}) IN (${literal})`, returnIdsOnly: 'true' });
+      const idsResult = await load(`${base}/query?${params}`);
+      if (idsResult.error) throw new Error(idsResult.error.message);
+      for (const id of idsResult.objectIds || []) matchedIds.add(id);
+    }
+    const ids = [...matchedIds];
     if (ids.length > 25000) throw new Error('This feature exceeds the 25,000-record local import limit.');
-    for (let i = 0; i < ids.length; i += 500) {
-      const p = new URLSearchParams({ f: 'geojson', objectIds: ids.slice(i, i + 500).join(','), outFields: '*', outSR: '4326', returnGeometry: 'true' });
-      const page = await load(`${base}/query?${p}`);
+    for (let i = 0; i < ids.length;) {
+      let count = Math.min(100, ids.length - i), url;
+      // Some ArcGIS gateways reject long query strings with HTTP 404 rather than 414.
+      do {
+        const p = new URLSearchParams({ f: 'geojson', objectIds: ids.slice(i, i + count).join(','), outFields: '*', outSR: '4326', returnGeometry: 'true' });
+        url = `${base}/query?${p}`;
+        if (url.length <= 1800) break;
+        count = Math.floor(count / 2);
+      } while (count > 0);
+      if (!count) throw new Error('ArcGIS geometry request exceeds the supported URL length.');
+      const page = await load(url);
       if (page.error) throw new Error(page.error.message);
       if (!Array.isArray(page.features)) throw new Error('This layer did not return GeoJSON.');
       truncated ||= !!page.exceededTransferLimit;
       records.push(...page.features);
+      i += count;
     }
     truncated ||= records.length !== ids.length;
   } else {
@@ -37,5 +50,5 @@ export async function importSource(source, query, load = publicJson) {
   }
   if (records.length > 25000) throw new Error('Too many records for one feature.');
   const payload = { type: 'FeatureCollection', features: records };
-  return { payload, metadata, truncated, checksum: createHash('sha256').update(JSON.stringify(payload)).digest('hex') };
+  return { payload, metadata: { ...metadata, queryTerms: terms }, truncated, checksum: createHash('sha256').update(JSON.stringify(payload)).digest('hex') };
 }

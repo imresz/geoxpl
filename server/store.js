@@ -20,11 +20,21 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
     CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, expires INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS searches(id INTEGER PRIMARY KEY, query TEXT NOT NULL, type TEXT NOT NULL, created TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS ai_calls(id INTEGER PRIMARY KEY, created INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS feature_settings(job_id TEXT PRIMARY KEY REFERENCES jobs(id), data TEXT NOT NULL);
   `);
   const getJob = id => db.prepare('SELECT * FROM jobs WHERE id=?').get(id);
   const event = (job, action, detail) => db.prepare('INSERT INTO events(job_id,action,detail,created) VALUES(?,?,?,?)').run(job, action, detail, now());
   return {
     db, getJob, event,
+    featureSettings(id) { const r = db.prepare('SELECT data FROM feature_settings WHERE job_id=?').get(id); return r ? JSON.parse(r.data) : { aliases: [], preferredSourceId: null }; },
+    setFeatureSettings(id, data) { db.prepare('INSERT INTO feature_settings VALUES(?,?) ON CONFLICT(job_id) DO UPDATE SET data=excluded.data').run(id, JSON.stringify(data)); event(id, 'identity_updated', 'Feature aliases and source selection updated'); },
+    invalidateFeature(jobId, reason) {
+      const r = db.prepare('SELECT id,data FROM features WHERE job_id=?').get(jobId);
+      if (!r) return;
+      const data = JSON.parse(r.data); data.status = 'partially_resolved'; data.warnings = [...new Set([...data.warnings, reason])];
+      db.prepare('UPDATE features SET data=? WHERE id=?').run(JSON.stringify(data), r.id);
+      db.prepare('UPDATE jobs SET feature_id=NULL WHERE id=?').run(jobId);
+    },
     setting(key, value) { if (value !== undefined) db.prepare('INSERT OR REPLACE INTO settings VALUES(?,?)').run(key, String(value)); return db.prepare('SELECT value FROM settings WHERE key=?').get(key)?.value; },
     request(query, type) {
       const canonical = query.trim().replace(/\s+/g, ' ');
@@ -47,11 +57,15 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
       event(null, 'source_proposed', data.name); return id;
     },
     decideSource(id, status, data) { db.prepare('UPDATE sources SET status=?,data=? WHERE id=?').run(status, JSON.stringify(data), id); event(null, `source_${status}`, data.name); },
-    addImport(sourceId, jobId, checksum, payload, metadata) { const id = randomUUID(); db.prepare('INSERT INTO imports VALUES(?,?,?,?,?,?,?)').run(id, sourceId, jobId, now(), checksum, JSON.stringify(payload), JSON.stringify(metadata)); return id; },
+    addImport(sourceId, jobId, checksum, payload, metadata) {
+      const existing = db.prepare('SELECT id FROM imports WHERE source_id=? AND job_id=? AND checksum=? AND metadata=? LIMIT 1').get(sourceId, jobId, checksum, JSON.stringify(metadata));
+      if (existing) { event(jobId, 'snapshot_reused', 'Unchanged import snapshot retained'); return existing.id; }
+      const id = randomUUID(); db.prepare('INSERT INTO imports VALUES(?,?,?,?,?,?,?)').run(id, sourceId, jobId, now(), checksum, JSON.stringify(payload), JSON.stringify(metadata)); return id;
+    },
     saveFeature(job, data) {
       const existing = db.prepare('SELECT id FROM features WHERE job_id=?').get(job.id);
       const id = existing?.id || randomUUID();
-      const result = { ...data, id, name: job.query, type: job.type, aliases: [], created: now() };
+      const result = { ...data, id, name: job.query, type: job.type, aliases: this.featureSettings(job.id).aliases, created: now() };
       db.prepare('INSERT INTO derivations VALUES(?,?,?,?)').run(randomUUID(), id, JSON.stringify(result), now());
       db.prepare('INSERT INTO features VALUES(?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET data=excluded.data').run(id, job.id, JSON.stringify(result), now());
       return result;
