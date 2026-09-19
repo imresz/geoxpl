@@ -1,8 +1,9 @@
 import Graph from 'graphology';
 import { connectedComponents } from 'graphology-components';
 import { bbox, length, area, feature, booleanValid, booleanIntersects, buffer, distance } from '@turf/turf';
+import { mainStemCandidate } from './main-stem.js';
 
-export const algorithmVersion = 'source-selected-assembly/2.0.0';
+export const algorithmVersion = 'main-stem-candidate/3.0.0';
 const scopeRegions = new WeakMap();
 export function validCoordinates(geometry) {
   let count = 0;
@@ -73,6 +74,7 @@ function selectRiverIdentity(records, boundary) {
   const parts = kept.flatMap(group => group.parts);
   const indices = new Set(parts.flatMap(part => [...part.records]));
   return {
+    parts,
     geometry: { type: 'MultiLineString', coordinates: parts.map(part => part.coordinates) },
     records: [...indices].map(index => records[index]),
     graph: { components: kept.length, branchJunctions: kept.reduce((n, g) => n + g.branches, 0), endpoints: kept.flatMap(g => g.endpoints) },
@@ -93,13 +95,24 @@ function processSource(job, item, boundary) {
     } catch { invalid++; }
   }
   if (!records.length) return { sourceId: source.id, sourceName: source.name, error: 'No usable named geometry was found.' };
-  let selected, geometry, graph = null, identity;
+  let selected, geometry, graph = null, identity, mainStem, recordedNetwork;
   if (job.type === 'river') {
     const match = selectRiverIdentity(records, boundary);
     if (match.error) return { sourceId: source.id, sourceName: source.name, error: match.error };
     ({ geometry, graph, identity } = match); selected = match.records;
     if (graph.components !== 1) warnings.push(`${graph.components} disconnected components. Gaps have not been bridged.`);
-    if (graph.branchJunctions) warnings.push(`${graph.branchJunctions} branching junctions. Main-stem selection requires more evidence.`);
+    if (graph.branchJunctions) {
+      const candidate = mainStemCandidate(match.parts);
+      if (candidate.error) {
+        mainStem = { status: 'unavailable', reason: candidate.error };
+        warnings.push(candidate.error);
+      } else {
+        recordedNetwork = { geometry, bbox: bbox(feature(geometry)), lengthKm: length(feature(geometry)), recordCount: selected.length };
+        mainStem = candidate.diagnostics;
+        geometry = candidate.geometry; selected = candidate.recordIndices.map(index => records[index]);
+        warnings.push(`A main-stem candidate was extracted from ${graph.branchJunctions} branching junctions. Branch choices and endpoints are not verified.`);
+      }
+    }
     if (graph.endpoints.length !== 2) warnings.push('A single source-to-mouth path could not be established.');
     if (identity.associatedComponents) warnings.push('Nearby continuation components need identity review; their gaps remain unchanged.');
   } else {
@@ -118,7 +131,7 @@ function processSource(job, item, boundary) {
   const shape = feature(geometry), bounds = bbox(shape);
   return {
     sourceId: source.id, sourceName: source.name, coverage: source.completeness, spanKm: distance(bounds.slice(0, 2), bounds.slice(2)),
-    result: { geometry, bbox: bounds, graph, identity, lengthKm: job.type === 'river' ? length(shape) : null, areaKm2: job.type === 'valley' ? area(shape) / 1e6 : null, source: null, mouth: null, principalDrainage: null, confidence: warnings.length ? 'review_required' : 'source_supported', method: job.type === 'river' ? 'single_source_named_network' : 'published_polygon', algorithmVersion, warnings, evidence, status: warnings.length ? 'partially_resolved' : 'resolved' }
+    result: { geometry, bbox: bounds, graph, identity, mainStem, recordedNetwork, lengthKm: job.type === 'river' ? length(shape) : null, areaKm2: job.type === 'valley' ? area(shape) / 1e6 : null, source: null, mouth: null, principalDrainage: null, confidence: mainStem?.status === 'candidate' ? 'unverified_candidate' : warnings.length ? 'review_required' : 'source_supported', method: mainStem?.status === 'candidate' ? 'main_stem_candidate' : job.type === 'river' ? 'single_source_named_network' : 'published_polygon', algorithmVersion, warnings, evidence, status: warnings.length ? 'partially_resolved' : 'resolved' }
   };
 }
 

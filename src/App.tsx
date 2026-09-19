@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Compass, Search, ArrowUpRight, Waves, Mountain, Database, LoaderCircle, ArrowLeft, Check, Clock3, ShieldCheck, X, Info } from 'lucide-react';
 import { MapView } from './MapView';
 import { api, statusLabel, type Job, type Feature } from './api';
@@ -9,6 +9,9 @@ export function App() {
   const [query, setQuery] = useState(''), [type, setType] = useState(''), [job, setJob] = useState<Job | null>(null), [waiting, setWaiting] = useState(false), [error, setError] = useState('');
   const [selected, setSelected] = useState<Feature | null>(null), [tab, setTab] = useState('explore'), [catalogue, setCatalogue] = useState<Feature[]>([]), [elapsed, setElapsed] = useState(0);
   const active = useRef<AbortController | null>(null);
+  const [showNetwork, setShowNetwork] = useState(false);
+  useEffect(() => { setShowNetwork(false); }, [selected]);
+  const displayedFeature = useMemo(() => selected && showNetwork && selected.recordedNetwork ? { ...selected, geometry: selected.recordedNetwork.geometry, bbox: selected.recordedNetwork.bbox } : selected, [selected, showNetwork]);
   const refreshCatalogue = () => api<Feature[]>('/catalogue').then(setCatalogue).catch(() => {});
   useEffect(() => { refreshCatalogue(); return () => active.current?.abort(); }, []);
   async function search(event?: React.FormEvent, requested?: { query: string; type: string }) {
@@ -45,7 +48,9 @@ export function App() {
           <button className="text-button back" onClick={() => { setSelected(null); setJob(null); }}><ArrowLeft size={15}/>Overview</button>
           <div className="feature-type">{selected.type === 'river' ? <Waves size={17}/> : <Mountain size={17}/>} {selected.type}</div>
           <h1 className="feature-name">{selected.name}</h1><span className={`badge ${selected.status === 'resolved' ? 'green' : 'amber'}`}>{statusLabel(selected.status)}</span>
-          <div className="measure"><strong>{selected.lengthKm?.toFixed(1) || selected.areaKm2?.toFixed(1)}</strong><span>{selected.type === 'river' ? 'km of recorded watercourse' : 'km² recorded extent'}</span></div>
+          {selected.recordedNetwork && <div className="geometry-modes" role="group" aria-label="River geometry"><button aria-pressed={!showNetwork} onClick={() => setShowNetwork(false)}>Main-stem candidate</button><button aria-pressed={showNetwork} onClick={() => setShowNetwork(true)}>Named network</button></div>}
+          <div className="measure"><strong>{(showNetwork ? selected.recordedNetwork?.lengthKm : selected.lengthKm)?.toFixed(1) || selected.areaKm2?.toFixed(1)}</strong><span>{selected.type === 'river' ? selected.mainStem?.status === 'candidate' && !showNetwork ? 'km of unverified candidate' : 'km of recorded watercourse' : 'km² recorded extent'}</span></div>
+          {selected.mainStem?.status === 'candidate' && <details className="candidate-limits"><summary>Candidate limitations</summary>{selected.mainStem.limitations?.map((text, i) => <p className="muted small" key={i}>{text}</p>)}</details>}
           {selected.warnings.map((w, i) => <p className="warning" key={i}><Info size={15}/>{w}</p>)}
           <div className="detail-section"><h2>Provenance</h2>{[...new Map(selected.evidence.map(e => [e.sourceId, e])).values()].map(e => <a key={e.sourceId} className="source-link" href={e.sourceUrl} target="_blank" rel="noreferrer"><span>{e.sourceName}<small>{e.licence}</small></span><ArrowUpRight size={16}/></a>)}<dl><dt>Source records</dt><dd>{selected.evidence.length}</dd><dt>Method</dt><dd>{selected.method.replaceAll('_', ' ')}</dd><dt>Processed</dt><dd>{new Date(selected.created).toLocaleDateString()}</dd></dl><details><summary>Processing evidence</summary><pre>{JSON.stringify({ id: selected.id, algorithm: selected.algorithmVersion, identity: selected.identity, selection: selected.selection, evidence: selected.evidence }, null, 2)}</pre></details></div>
         </> : <>
@@ -54,17 +59,17 @@ export function App() {
           {(waiting || job) && <div className="search-result" role="status" aria-live="polite">
             <div className="result-symbol">{waiting ? <LoaderCircle className="spin" size={24}/> : job?.status === 'resolved' ? <Check size={24}/> : <Clock3 size={24}/>}</div>
             <h2>{job?.query || query}</h2><span className="feature-type">{job?.type || type}</span>
-            <h3>{waiting ? 'Preparing your feature' : job?.status === 'resolved' ? 'Feature ready' : job?.status === 'failed' ? 'Processing interrupted' : job?.phase === 'awaiting_review' ? 'Awaiting review' : 'Processing continues'}</h3>
+            <h3>{waiting ? 'Preparing your feature' : job?.status === 'resolved' ? 'Feature ready' : job?.status === 'failed' ? 'Processing interrupted' : job?.phase === 'awaiting_data' ? 'Needs geographic evidence' : job?.phase === 'awaiting_review' ? 'Awaiting review' : 'Processing continues'}</h3>
             <p>{waiting ? 'Checking sources and assembling the geometry.' : job?.status === 'pending' ? 'Please try this search again later. Your request is saved.' : job?.message || 'Your request is being processed.'}</p>
             {waiting && <div className="progress-track"><span style={{ width: `${elapsed / 5 * 100}%` }}/></div>}
             {!waiting && job && <><span className="badge">{statusLabel(job.phase)}</span><button className="secondary full" onClick={() => search(undefined, { query: job.query, type: job.type })}>Check again</button></>}
-            {!waiting && job?.feature && job.status !== 'resolved' && <button className="text-button" onClick={() => setSelected(job.feature)}>View available geometry<ArrowUpRight size={15}/></button>}
+            {!waiting && job?.feature && job.status !== 'resolved' && <button className="text-button" onClick={() => setSelected(job.feature)}>{job.feature.mainStem?.status === 'candidate' ? 'View main-stem candidate' : 'View available geometry'}<ArrowUpRight size={15}/></button>}
           </div>}
           {!waiting && !job && <><div className="overview-row"><Waves size={20}/><span>Rivers</span><span className="muted">Main-stem geometry</span></div><div className="overview-row"><Mountain size={20}/><span>Valleys</span><span className="muted">Published extents</span></div><div className="catalogue-summary"><span>PROCESSED CATALOGUE</span><strong>{catalogue.length.toString().padStart(2, '0')}</strong><p>{catalogue.length ? 'Features ready to explore' : 'No features stored yet'}</p></div></>}
         </>}
         <div className="panel-footer"><span className="boundary-swatch"/>Victoria boundary<span>01 / AU</span></div>
       </aside>
-      <MapView feature={selected}/>
+      <MapView feature={displayedFeature}/>
     </main>
     <footer className="app-footer"><span>GeoXpl <span className="footer-divider">/</span> Geographic exploration</span><span className="footer-right"><span className="live-dot"/>Local workspace</span></footer>
   </div>;

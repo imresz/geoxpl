@@ -105,7 +105,25 @@ test('failed comparison source does not prevent a complete selected source from 
   } finally { store.close(); }
 });
 
-test('review decisions do not retry or overwrite jobs; only changed feature settings queue processing', async () => {
+test('reviewed evidence is not requested again when a comparison source becomes unavailable', async () => {
+  const store = createStore(':memory:');
+  try {
+    const primary = store.addSource({ ...source, completeness: 'partial' }); store.decideSource(primary, 'approved', { ...source, completeness: 'partial' });
+    const other = store.addSource(source); store.decideSource(other, 'approved', source);
+    const saved = store.request('Test River', 'river');
+    store.setFeatureSettings(saved.id, { aliases: [], preferredSourceId: primary });
+    let offline = false, calls = 0;
+    const worker = createWorker(store, { boundary, importer: async s => { if (s.id === other && offline) throw Error('Temporary outage'); return imported([record([[1,1],[2,2]])]); }, researcher: async () => { calls++; return { provider: 'test', summary: 'Missing coverage', candidates: [] }; } }); worker.stop();
+    await worker.run(saved);
+    store.db.prepare("UPDATE reports SET status='approved' WHERE job_id=?").run(saved.id);
+    offline = true; await worker.run(saved);
+    assert.equal(calls, 1); assert.equal(store.reports().length, 1);
+    assert.equal(store.getJob(saved.id).phase, 'awaiting_data');
+    assert.match(store.getJob(saved.id).message, /no further review/);
+  } finally { store.close(); }
+});
+
+test('review decisions stop asking for review without retrying; changed settings queue processing', async () => {
   const store = createStore(':memory:'); const app = createApp(store);
   const server = app.listen(0, '127.0.0.1'); await new Promise(r => server.once('listening', r));
   const root = `http://127.0.0.1:${server.address().port}`;
@@ -117,7 +135,7 @@ test('review decisions do not retry or overwrite jobs; only changed feature sett
     const reportId = store.report(saved.id, { summary: 'Recommendation', candidates: [] });
     for (const status of ['approved', 'rejected']) {
       assert.equal((await send(`/api/admin/reports/${reportId}`, { status, notes: '' }, 'PATCH')).status, 200);
-      assert.equal(store.getJob(saved.id).attempts, 0); assert.equal(store.getJob(saved.id).phase, 'awaiting_review');
+      assert.equal(store.getJob(saved.id).attempts, 0); assert.equal(store.getJob(saved.id).phase, 'awaiting_data');
     }
     const sourceId = store.addSource(source);
     assert.equal((await send(`/api/admin/jobs/${saved.id}/settings`, { aliases: [], preferredSourceId: sourceId }, 'PATCH')).status, 400);

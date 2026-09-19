@@ -33,17 +33,25 @@ export function createWorker(store, options = {}) {
     if (output.result) featureId = store.saveFeature(job, output.result).id;
     else store.invalidateFeature(job.id, 'No current usable geometry. Review identity and source selection.');
     if (output.status === 'resolved') return store.updateJob(job.id, 'resolved', 'completed', 'Feature ready', featureId);
-    const diagnostics = { settings, status: output.status, warnings: output.result?.warnings || [], identity: output.result?.identity, selectedSourceId: output.result?.selection.sourceId, comparisons: output.comparisons, importFailures: failures };
+    if (output.result?.mainStem && !forceResearch) {
+      const candidate = output.result.mainStem.status === 'candidate';
+      store.event(job.id, 'main_stem_processed', candidate ? `Candidate: ${output.result.lengthKm.toFixed(1)} km; ${output.result.mainStem.componentRoutes.length} separate component routes. Not verified.` : output.result.mainStem.reason);
+      return store.updateJob(job.id, output.status, 'awaiting_data', candidate ? 'Main-stem candidate prepared. Verified branch choices, endpoints and any missing connections are still needed.' : output.result.mainStem.reason, featureId);
+    }
+    const diagnostics = { settings, status: output.status, warnings: output.result?.warnings || [], identity: output.result?.identity, mainStem: output.result?.mainStem, selectedSourceId: output.result?.selection.sourceId, comparisons: output.comparisons, importFailures: failures };
+    const relevant = output.result ? sources.filter(s => s.id === output.result.selection.sourceId) : sources;
+    const relevantIds = new Set(relevant.map(s => s.id));
     const fingerprint = createHash('sha256').update(JSON.stringify({
       query: job.normalized || job.query, type: job.type, settings, algorithmVersion,
-      sources: sources.map(s => ({ id: s.id, url: s.url, nameField: s.nameField, idField: s.idField, completeness: s.completeness, version: s.version, licence: s.licence, attribution: s.attribution })),
-      imports: imports.map(i => ({ sourceId: i.source.id, checksum: i.checksum, truncated: i.truncated })),
-      diagnostics, ai: aiConfigured(), model: process.env.OPENAI_MODEL || ''
+      sources: relevant.map(s => ({ id: s.id, url: s.url, nameField: s.nameField, idField: s.idField, completeness: s.completeness, version: s.version, licence: s.licence, attribution: s.attribution })),
+      imports: imports.filter(i => relevantIds.has(i.source.id)).map(i => ({ sourceId: i.source.id, checksum: i.checksum, truncated: i.truncated })),
+      evidence: { status: output.status, warnings: diagnostics.warnings, identity: diagnostics.identity, mainStem: diagnostics.mainStem, selectedSourceId: diagnostics.selectedSourceId },
+      ai: aiConfigured(), model: process.env.OPENAI_MODEL || ''
     })).digest('hex');
     const cached = !forceResearch && store.reports().find(r => r.job_id === job.id && r.data.fingerprint === fingerprint && !['system', 'rate limit'].includes(r.data.provider));
     if (cached) {
       store.event(job.id, 'research_reused', `Unchanged processing evidence; retained report ${cached.id}`);
-      return store.updateJob(job.id, output.status, 'awaiting_review', 'Unchanged processing evidence. Administrator review is required.', featureId);
+      return store.updateJob(job.id, output.status, cached.status === 'pending' ? 'awaiting_review' : 'awaiting_data', cached.status === 'pending' ? 'An existing research report is awaiting review. No new report was generated.' : 'Research has been reviewed. Updated geographic evidence or processing capability is needed; no further review is requested.', featureId);
     }
     store.updateJob(job.id, 'pending', 'researching', 'Investigating missing data or capability', featureId);
     try {
