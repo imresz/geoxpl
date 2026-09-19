@@ -51,11 +51,20 @@ export async function extendGeofabric(imported, load, progress = () => {}) {
   const all = [...records.values()].sort((a, b) => a.properties.hydroid - b.properties.hydroid);
   const starts = new Set(all.map(f => f.properties.from_node)), ends = new Set(all.map(f => f.properties.to_node));
   const endpointIds = [...new Set([...starts].filter(id => !ends.has(id)).concat([...ends].filter(id => !starts.has(id))))];
-  const nodes = await rows(load, 3, 'hydroid', endpointIds, true);
+  const seedStarts = new Set(imported.payload.features.map(f => f.properties.from_node));
+  const junctionIds = [...new Set(imported.payload.features.map(f => f.properties.to_node).filter(id => !seedStarts.has(id)))];
+  if (junctionIds.length > 128) throw Error('Geofabric exceeds the 128 potential-confluence limit.');
+  progress(`Checking Geofabric river junctions: ${junctionIds.length} nodes`);
+  // Query both sides of a possible mouth; downstream closure alone omits the receiving river upstream.
+  const incoming = await rows(load, 6, 'to_node', junctionIds, true);
+  const outgoing = await rows(load, 6, 'from_node', junctionIds, true);
+  if (incoming.length + outgoing.length > limit) throw Error('Geofabric junction evidence exceeds the 10,000-record limit.');
+  const junctions = junctionIds.map(nodeId => ({ nodeId, incoming: incoming.filter(f => f.properties.to_node === nodeId), outgoing: outgoing.filter(f => f.properties.from_node === nodeId) }));
+  const nodes = await rows(load, 3, 'hydroid', [...endpointIds, ...junctionIds], true);
   const counts = new Map();
   for (const record of all) counts.set(record.properties.from_node, (counts.get(record.properties.from_node) || 0) + 1);
   const preferences = (await rows(load, 37, 'nodeid', [...counts].filter(([, n]) => n > 1).map(([id]) => id))).map(f => f.attributes);
-  const trace = { version: 'geofabric-network/1', namedIds, missingIds: [...missing], nodes, preferences, nodesUrl: `${base}/3`, preferencesUrl: `${base}/37` };
+  const trace = { version: 'geofabric-network/2', namedIds, missingIds: [...missing], nodes, preferences, junctions, nodesUrl: `${base}/3`, preferencesUrl: `${base}/37` };
   const payload = { type: 'FeatureCollection', features: all };
   const checksum = createHash('sha256').update(JSON.stringify({ payload, trace })).digest('hex');
   return { ...imported, payload, checksum, metadata: { ...imported.metadata, geofabric: trace } };
@@ -69,10 +78,37 @@ function oriented(record) {
   return p.flowdir === 2 ? [...geometry.coordinates].reverse() : geometry.coordinates;
 }
 
+function confluenceAt(previous, junction, node, terms, byId) {
+  if (!previous || !named(previous, terms) || !junction) return null;
+  const { incoming, outgoing } = junction;
+  if (outgoing.some(f => named(f, terms))) return null;
+  const receiving = outgoing.filter(f => normalize(String(f.properties.name || '')));
+  if (!receiving.length) return null;
+  // Waterbody connections can change names without being tributary mouths.
+  if (node && node.properties.ahgfftype !== 4) return null;
+  const fail = reason => ({ error: `Confluence at node ${junction.nodeId} needs evidence: ${reason}` });
+  if (!node || node.geometry?.type !== 'Point') return fail('a classified junction point is missing.');
+  if (outgoing.length !== 1) return fail('the receiving river has ambiguous outgoing branches.');
+  const downstream = receiving[0], name = normalize(downstream.properties.name);
+  const upstream = incoming.filter(f => f.properties.hydroid !== previous.properties.hydroid && normalize(String(f.properties.name || '')) === name);
+  if (!upstream.length) return null;
+  if (upstream.length !== 1) return fail('a unique same-named receiving river must enter and leave the junction.');
+  if ([upstream[0], downstream].some(f => byId.has(f.properties.hydroid) && JSON.stringify(byId.get(f.properties.hydroid)) !== JSON.stringify(f))) return fail('receiving-river records conflict with the imported network.');
+  const tributary = incoming.find(f => f.properties.hydroid === previous.properties.hydroid);
+  if (!tributary || JSON.stringify(tributary) !== JSON.stringify(previous)) return fail('the junction query does not agree with the traced tributary record.');
+  if (previous.properties.nextdownid !== downstream.properties.hydroid || upstream[0].properties.nextdownid !== downstream.properties.hydroid) return fail('published downstream IDs do not confirm the receiving river.');
+  if (previous.properties.to_node !== junction.nodeId || upstream[0].properties.to_node !== junction.nodeId || downstream.properties.from_node !== junction.nodeId) return fail('published node IDs are inconsistent.');
+  try {
+    const points = [oriented(previous).at(-1), oriented(upstream[0]).at(-1), oriented(downstream)[0]];
+    if (points.some(point => distance(node.geometry.coordinates, point) > 0.000001)) return fail('stream endpoints do not coincide with the junction; no bridge was invented.');
+  } catch (error) { return fail(error.message); }
+  return { kind: 'confluence', nodeId: junction.nodeId, receivingRiver: downstream.properties.name, tributaryHydroId: previous.properties.hydroid, receivingUpstreamHydroId: upstream[0].properties.hydroid, receivingDownstreamHydroId: downstream.properties.hydroid, rule: 'published_receiving_river_continuity', records: [upstream[0], downstream] };
+}
+
 export function traceGeofabric(item, boundary, terms) {
   const trace = item.metadata?.geofabric;
   const records = item.payload.features;
-  if (!trace || trace.version !== 'geofabric-network/1') return { error: 'Geofabric connectivity and endpoint evidence has not been imported.' };
+  if (!trace || !['geofabric-network/1', 'geofabric-network/2'].includes(trace.version)) return { error: 'Geofabric connectivity and endpoint evidence has not been imported.' };
   if (!boundary) return { error: 'The Victoria boundary is required to identify the intended river.' };
   const region = buffer(boundary, 2, { units: 'kilometers' });
   const byId = new Map(), outgoing = new Map(), nodes = new Map(trace.nodes.map(n => [n.properties.hydroid, n]));
@@ -85,12 +121,17 @@ export function traceGeofabric(item, boundary, terms) {
   }
   const prefs = new Map(trace.preferences.map(p => [p.nodeid, p.prefedgeid]));
   const namedIds = new Set(trace.namedIds);
+  const junctions = new Map((trace.junctions || []).map(j => [j.nodeId, j]));
   const heads = [...nodes.values()].filter(n => n.properties.ahgfftype === 9 && (outgoing.get(n.properties.hydroid) || []).some(f => namedIds.has(f.properties.hydroid) && named(f, terms)));
   const candidates = [];
   for (const head of heads) {
-    let current = head.properties.hydroid, previous = null, failure = null;
+    let current = head.properties.hydroid, previous = null, failure = null, confluence = null;
     const path = [], decisions = [], seen = new Set();
     while (path.length < limit) {
+      const mouth = confluenceAt(previous, junctions.get(current), nodes.get(current), terms, byId);
+      if (mouth?.error) { failure = mouth.error; break; }
+      if (mouth && [mouth.receivingUpstreamHydroId, mouth.receivingDownstreamHydroId].some(id => seen.has(id))) { failure = 'Receiving-river evidence reconnects to the traced route; a cycle cannot define a mouth.'; break; }
+      if (mouth) { confluence = mouth; break; }
       const choices = outgoing.get(current) || [];
       if (!choices.length) break;
       if (previous?.properties.nextdownid === -1) { failure = 'The published end-of-network marker conflicts with outgoing segments.'; break; }
@@ -119,7 +160,8 @@ export function traceGeofabric(item, boundary, terms) {
     const warnings = failure ? [failure] : [];
     let verifiedOutlet = false;
     if (path.length === limit) warnings.push('The route reached the processing limit.');
-    if (!outlet || outlet.properties.ahgfftype !== 5 || previous?.properties.nextdownid !== -1) warnings.push('A classified terminal node and end-of-network marker were not reached.');
+    if (confluence) verifiedOutlet = true;
+    else if (!outlet || outlet.properties.ahgfftype !== 5 || previous?.properties.nextdownid !== -1) warnings.push('A classified terminal node and end-of-network marker, or a verified receiving-river confluence, was not reached.');
     else if (outlet.geometry?.type !== 'Point' || distance(outlet.geometry.coordinates, path.at(-1).coordinates.at(-1)) > 0.000001) warnings.push('The terminal node does not match the stream geometry.');
     else verifiedOutlet = true;
     const routeLength = path.reduce((total, p) => total + length(feature({ type: 'LineString', coordinates: p.coordinates })), 0);
@@ -127,7 +169,7 @@ export function traceGeofabric(item, boundary, terms) {
     const nameFraction = routeLength > 0 ? namedLength / routeLength : 0;
     if (nameFraction < 0.95) warnings.push('More than 5% of this flow path lies outside the approved river names. A tributary mouth or additional identity evidence is needed.');
     if (trace.missingIds.length || item.truncated) warnings.push('Some network records were unavailable; the import is not complete.');
-    candidates.push({ path, head, outlet: verifiedOutlet ? outlet : null, decisions, warnings, nameFraction });
+    candidates.push({ path, head, outlet: verifiedOutlet ? outlet : null, confluence, decisions, warnings, nameFraction });
   }
   if (!candidates.length) return { error: 'No route from a classified, named headwater intersects Victoria. A source or confluence identity needs additional evidence.' };
   if (candidates.length > 1) {
@@ -139,11 +181,14 @@ export function traceGeofabric(item, boundary, terms) {
   const coordinates = candidate.path.flatMap((p, i) => i ? p.coordinates.slice(1) : p.coordinates);
   const geometry = { type: 'LineString', coordinates }, shape = feature(geometry);
   const endpoint = (node, label) => node ? { coordinates: node.geometry.coordinates, nodeId: node.properties.hydroid, objectId: node.id ?? node.properties.objectid, sourceUrl: trace.nodesUrl, classification: label } : null;
+  const { records: confluenceRecords = [], ...termination } = candidate.confluence || { kind: candidate.outlet ? 'network_terminus' : 'unverified', nodeId: candidate.outlet?.properties.hydroid };
+  const mouth = endpoint(candidate.outlet, candidate.confluence ? 'BoM river confluence' : 'BoM network terminus');
+  if (mouth && candidate.confluence) mouth.receivingRiver = candidate.confluence.receivingRiver;
   return {
-    geometry, bbox: bbox(shape), records: route, source: endpoint(candidate.head, 'BoM network headwater'), mouth: endpoint(candidate.outlet, 'BoM network terminus'),
+    geometry, bbox: bbox(shape), records: route, confluenceRecords, source: endpoint(candidate.head, 'BoM network headwater'), mouth,
     graph: { components: 1, branchJunctions: 0, endpoints: [coordinates[0], coordinates.at(-1)] },
     identity: { excludedRecords: records.length - route.length, scopeBufferKm: 2, namedLengthFraction: candidate.nameFraction },
-    mainStem: { status: candidate.warnings.length ? 'candidate' : 'published_network', method: 'named_directed_geofabric', componentRoutes: [{ endpoints: [coordinates[0], coordinates.at(-1)], lengthKm: length(shape) }], branchDecisions: candidate.decisions, preferencesUrl: trace.preferencesUrl, usedPreferences: trace.preferences.filter(p => candidate.decisions.some(d => d.rule === 'published_preferred_flow' && d.nodeId === p.nodeid)), selectedHydroIds: route.map(f => f.properties.hydroid), limitations: ['BoM terrain-derived flow path, including modelled waterbody connections. Not a surveyed centreline or a navigation route.', 'Endpoint labels refer to published network nodes, not independently surveyed physical source or mouth positions.'] },
+    mainStem: { status: candidate.warnings.length ? 'candidate' : 'published_network', method: 'named_directed_geofabric', termination, componentRoutes: [{ endpoints: [coordinates[0], coordinates.at(-1)], lengthKm: length(shape) }], branchDecisions: candidate.decisions, preferencesUrl: trace.preferencesUrl, usedPreferences: trace.preferences.filter(p => candidate.decisions.some(d => d.rule === 'published_preferred_flow' && d.nodeId === p.nodeid)), selectedHydroIds: route.map(f => f.properties.hydroid), limitations: ['BoM terrain-derived flow path, including modelled waterbody connections. Not a surveyed centreline or a navigation route.', 'Endpoint labels refer to published network nodes, not independently surveyed physical source or mouth positions.'] },
     warnings: candidate.warnings,
     status: candidate.warnings.length ? 'partially_resolved' : 'resolved'
   };

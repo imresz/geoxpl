@@ -5,7 +5,7 @@ import { mainStemCandidate } from './main-stem.js';
 import { isGeofabric, traceGeofabric } from './geofabric.js';
 import { normalize } from './store.js';
 
-export const algorithmVersion = 'directed-geofabric/4.0.0';
+export const algorithmVersion = 'directed-geofabric/4.1.0';
 const scopeRegions = new WeakMap();
 export function validCoordinates(geometry) {
   let count = 0;
@@ -142,12 +142,13 @@ function processDirectedSource(job, item, boundary, settings) {
   const source = item.source;
   const result = traceGeofabric(item, boundary, [job.query, ...(settings.aliases || [])].filter(Boolean).map(normalize));
   if (result.error) return { sourceId: source.id, sourceName: source.name, error: result.error };
-  const { records, ...data } = result;
+  const { records, confluenceRecords, ...data } = result;
   if (source.completeness === 'partial') data.warnings.push('The source is explicitly marked as partial coverage.');
   data.status = data.warnings.length ? 'partially_resolved' : 'resolved';
   data.mainStem.status = data.warnings.length ? 'candidate' : 'published_network';
   const provenance = { sourceId: source.id, sourceName: source.name, sourceUrl: source.url, licence: source.licence, attribution: source.attribution, importId: item.id, sourceVersion: source.version || 'retrieved snapshot', checksum: item.checksum };
   const evidence = records.map(record => ({ ...provenance, objectId: String(record.id ?? record.properties[source.idField]), hydroId: record.properties.hydroid, role: 'route_segment' }));
+  for (const record of confluenceRecords) evidence.push({ ...provenance, objectId: String(record.id ?? record.properties[source.idField]), hydroId: record.properties.hydroid, role: 'confluence_support' });
   for (const endpoint of [data.source, data.mouth].filter(Boolean)) evidence.push({ ...provenance, sourceUrl: endpoint.sourceUrl, objectId: String(endpoint.objectId), hydroId: endpoint.nodeId, role: 'endpoint' });
   for (const pref of data.mainStem.usedPreferences) evidence.push({ ...provenance, sourceUrl: data.mainStem.preferencesUrl, objectId: String(pref.objectid), role: 'preferred_flow' });
   return { sourceId: source.id, sourceName: source.name, coverage: source.completeness, spanKm: distance(data.bbox.slice(0, 2), data.bbox.slice(2)), result: { ...data, lengthKm: length(feature(data.geometry)), areaKm2: null, principalDrainage: null, confidence: data.status === 'resolved' ? 'derived_published_network' : 'review_required', method: 'geofabric_directed_main_stem', algorithmVersion, evidence } };

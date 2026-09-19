@@ -96,17 +96,152 @@ test('import expansion retrieves linked unnamed records and hashes topology evid
   let queries = 0;
   const load = async input => {
     const url = new URL(input); queries++;
-    if (url.pathname.endsWith('/6/query')) return { features: original.payload.features.slice(2) };
+    if (url.pathname.endsWith('/6/query')) {
+      const field = url.searchParams.get('where').split(' ')[0];
+      return { features: field === 'hydroid' ? original.payload.features.slice(2) : original.payload.features.filter(f => f.properties[field] === 3) };
+    }
     if (url.pathname.endsWith('/3/query')) return { features: original.metadata.geofabric.nodes };
     if (url.pathname.endsWith('/37/query')) return { features: [] };
     assert.fail('Unexpected URL');
   };
   const expanded = await extendGeofabric(item, load);
-  assert.equal(expanded.payload.features.length, 4); assert.equal(queries, 3);
+  assert.equal(expanded.payload.features.length, 4); assert.equal(queries, 5);
   assert.equal(expanded.metadata.geofabric.missingIds.length, 0);
   assert.equal(trace(expanded).status, 'resolved');
   assert.equal(expanded.checksum, createHash('sha256').update(JSON.stringify({ payload: expanded.payload, trace: expanded.metadata.geofabric })).digest('hex'));
   await assert.rejects(extendGeofabric(item, async () => ({ features: [], exceededTransferLimit: true })), /incomplete/);
+});
+
+function tributary() {
+  const item = fixture();
+  const last = item.payload.features[1]; last.properties.nextdownid = 21;
+  const downstream = line(21,3,4,-1,[[4,1],[8,1]],'RECEIVING RIVER');
+  const upstream = line(20,6,3,21,[[4,3],[4,1]],'RECEIVING RIVER');
+  item.payload.features[3] = downstream;
+  item.metadata.geofabric.version = 'geofabric-network/2';
+  item.metadata.geofabric.nodes[1].geometry.coordinates = [8,1];
+  item.metadata.geofabric.nodes.push(node(3,4,[4,1]));
+  item.metadata.geofabric.junctions = [{ nodeId: 3, incoming: [last,upstream], outgoing: [downstream] }];
+  return item;
+}
+
+test('tributary ends at a published receiving-river junction, without adding receiving geometry', () => {
+  const item = tributary(), result = trace(item);
+  assert.equal(result.status, 'resolved');
+  assert.deepEqual(result.records.map(f => f.properties.hydroid), [11,12]);
+  assert.deepEqual(result.geometry.coordinates, [[1,1],[2,1],[4,1]]);
+  assert.equal(result.mouth.nodeId, 3);
+  assert.equal(result.mouth.classification, 'BoM river confluence');
+  assert.equal(result.mouth.receivingRiver, 'RECEIVING RIVER');
+  assert.deepEqual(result.confluenceRecords.map(f => f.properties.hydroid), [20,21]);
+  const processed = processGeometry({ query: 'Test River', type: 'river' }, [item], boundary).result;
+  assert.equal(processed.mainStem.termination.rule, 'published_receiving_river_continuity');
+  assert.equal(processed.mainStem.termination.receivingUpstreamHydroId, 20);
+  assert.equal(processed.evidence.filter(e => e.role === 'route_segment').length, 2);
+  assert.deepEqual(processed.evidence.filter(e => e.role === 'confluence_support').map(e => e.hydroId), [20,21]);
+  assert.ok(processed.evidence.every(e => e.importId === 'import' && e.checksum === 'fixture'));
+  assert.ok(!('confluenceRecords' in processed));
+});
+
+for (const [label, mutate] of [
+  ['missing junction', item => { item.metadata.geofabric.nodes.pop(); }],
+  ['non-junction node', item => { item.metadata.geofabric.nodes.at(-1).properties.ahgfftype = 7; }],
+  ['missing upstream receiver', item => { item.metadata.geofabric.junctions[0].incoming.pop(); }],
+  ['receiving name mismatch', item => { item.metadata.geofabric.junctions[0].incoming[1].properties.name = 'ANOTHER RIVER'; }],
+  ['wrong tributary flow link', item => { item.payload.features[1].properties.nextdownid = 13; }],
+  ['wrong receiving flow link', item => { item.metadata.geofabric.junctions[0].incoming[1].properties.nextdownid = 13; }],
+  ['unknown receiving direction', item => { item.metadata.geofabric.junctions[0].incoming[1].properties.flowdir = 3; }],
+  ['receiving geometry gap', item => { item.metadata.geofabric.junctions[0].incoming[1].geometry.coordinates[1] = [4.001,1]; }],
+  ['junction point gap', item => { item.metadata.geofabric.nodes.at(-1).geometry.coordinates = [4.001,1]; }],
+  ['ambiguous downstream branches', item => { item.metadata.geofabric.junctions[0].outgoing.push(line(22,3,7,-1,[[4,1],[4,5]],'SECOND RIVER')); }],
+  ['ambiguous incoming receiver', item => { item.metadata.geofabric.junctions[0].incoming.push(line(23,7,3,21,[[5,4],[4,1]],'RECEIVING RIVER')); }],
+  ['inconsistent snapshot', item => { const copy = structuredClone(item.payload.features[1]); copy.properties.from_node = 90; item.metadata.geofabric.junctions[0].incoming[0] = copy; }],
+  ['inconsistent receiving snapshot', item => { const copy = structuredClone(item.payload.features[3]); copy.geometry.coordinates[1] = [7,1]; item.metadata.geofabric.junctions[0].outgoing[0] = copy; }],
+  ['wrong receiving node ID', item => { item.metadata.geofabric.junctions[0].incoming[1].properties.to_node = 99; }]
+]) test(`${label} cannot verify a tributary mouth`, () => {
+  const item = tributary(); mutate(item); const result = trace(item);
+  assert.equal(result.status, 'partially_resolved');
+  assert.notEqual(result.mainStem.termination.kind, 'confluence');
+});
+
+test('against-digitized receiving records can prove a confluence', () => {
+  const item = tributary();
+  for (const f of [item.metadata.geofabric.junctions[0].incoming[1], item.metadata.geofabric.junctions[0].outgoing[0]]) {
+    f.properties.flowdir = 2; f.geometry.coordinates.reverse();
+  }
+  assert.equal(trace(item).status, 'resolved');
+  assert.equal(trace(item).mainStem.termination.kind, 'confluence');
+});
+
+test('a short name transition is not mistaken for a receiving-river confluence', () => {
+  const item = tributary(); item.metadata.geofabric.junctions[0].incoming.pop();
+  item.payload.features[3].geometry.coordinates[1] = [4.001,1];
+  item.metadata.geofabric.nodes[1].geometry.coordinates = [4.001,1];
+  assert.equal(trace(item).status, 'resolved');
+  assert.equal(trace(item).mainStem.termination.kind, 'network_terminus');
+  assert.deepEqual(trace(item).mainStem.selectedHydroIds, [11,12,21]);
+});
+
+test('a through-river or approved alias continues past a junction instead of being truncated', () => {
+  for (const continuationName of ['TEST RIVER', 'RIVER TEST']) {
+    const item = tributary(), continuation = line(22,3,7,-1,[[4,1],[5,2]],continuationName);
+    item.payload.features.push(continuation);
+    item.metadata.geofabric.junctions[0].outgoing.push(continuation);
+    item.metadata.geofabric.nodes.push(node(7,5,[5,2]));
+    item.payload.features[1].properties.nextdownid = 22;
+    const result = traceGeofabric(item, boundary, ['test river','river test']);
+    assert.equal(result.status, 'resolved');
+    assert.equal(result.mainStem.termination.kind, 'network_terminus');
+    assert.deepEqual(result.mainStem.selectedHydroIds, [11,12,22]);
+    assert.equal(result.confluenceRecords.length, 0);
+  }
+});
+
+test('confluence imports retain complete adjacent evidence separately and checksum it', async () => {
+  const full = tributary(), seeds = structuredClone(full);
+  seeds.payload.features = seeds.payload.features.slice(0,2);
+  const all = [...full.payload.features, full.metadata.geofabric.junctions[0].incoming[1]];
+  const calls = [];
+  const load = async input => {
+    const url = new URL(input), where = url.searchParams.get('where'); calls.push(url);
+    const [field] = where.split(' '), ids = where.match(/\((.*)\)/)[1].split(',').map(Number);
+    if (url.pathname.endsWith('/6/query')) return { features: all.filter(f => ids.includes(f.properties[field])) };
+    if (url.pathname.endsWith('/3/query')) return { features: full.metadata.geofabric.nodes.filter(f => ids.includes(f.properties.hydroid)) };
+    if (url.pathname.endsWith('/37/query')) return { features: [] };
+    assert.fail('Unexpected URL');
+  };
+  const imported = await extendGeofabric(seeds, load);
+  assert.equal(imported.metadata.geofabric.version, 'geofabric-network/2');
+  assert.ok(calls.some(url => url.searchParams.get('where') === 'to_node IN (3)'));
+  assert.ok(calls.some(url => url.searchParams.get('where') === 'from_node IN (3)'));
+  assert.ok(!imported.payload.features.some(f => f.properties.hydroid === 20));
+  assert.equal(trace(imported).status, 'resolved');
+  const altered = structuredClone(imported.metadata.geofabric);
+  altered.junctions[0].incoming[1].properties.flowdir = 3;
+  assert.notEqual(imported.checksum, createHash('sha256').update(JSON.stringify({ payload: imported.payload, trace: altered })).digest('hex'));
+  await assert.rejects(extendGeofabric(seeds, async input => new URL(input).searchParams.get('where').startsWith('to_node') ? { features: [], exceededTransferLimit: true } : load(input)), /incomplete/);
+});
+
+test('old snapshots cannot claim confluence evidence they never imported', () => {
+  const item = tributary(); delete item.metadata.geofabric.junctions;
+  item.metadata.geofabric.version = 'geofabric-network/1';
+  assert.equal(trace(item).status, 'partially_resolved');
+  assert.notEqual(trace(item).mainStem.termination.kind, 'confluence');
+});
+
+test('worker publishes a confluence result without requesting another review', async () => {
+  const store = createStore(':memory:');
+  try {
+    const id = store.addSource(source); store.decideSource(id, 'approved', source);
+    const job = store.request('Test River', 'river');
+    const worker = createWorker(store, { boundary, importer: async () => tributary(), researcher: async () => assert.fail('A verified confluence must not request AI research') });
+    worker.stop(); await worker.run(job);
+    const completed = store.getJob(job.id), saved = store.feature(completed.feature_id);
+    assert.equal(completed.phase, 'completed'); assert.equal(completed.status, 'resolved');
+    assert.equal(saved.mouth.classification, 'BoM river confluence');
+    assert.equal(saved.mainStem.selectedHydroIds.length, 2);
+    assert.equal(store.reports().length, 0);
+  } finally { store.close(); }
 });
 
 test('processor carries endpoint and decision provenance; explicit partial coverage stays partial', () => {
