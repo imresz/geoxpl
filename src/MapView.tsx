@@ -27,6 +27,8 @@ export function MapView({ feature }: { feature: Feature | null }) {
       m.addLayer({ id: 'valley-fill', type: 'fill', source: 'selected', filter: ['==', '$type', 'Polygon'], paint: { 'fill-color': '#188a75', 'fill-opacity': 0.18 } });
       m.addLayer({ id: 'feature-halo', type: 'line', source: 'selected', paint: { 'line-color': '#ffffff', 'line-width': 7, 'line-opacity': 0.9 } });
       m.addLayer({ id: 'feature-line', type: 'line', source: 'selected', paint: { 'line-color': '#126fcb', 'line-width': 3.5 } });
+      m.addSource('endpoints', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      m.addLayer({ id: 'endpoint-points', type: 'circle', source: 'endpoints', paint: { 'circle-radius': 6, 'circle-color': ['match', ['get', 'kind'], 'source', '#186454', '#b84e36'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 } });
       setLoaded(true);
     });
     m.on('moveend', () => { const c = m.getCenter(); setCenter(`${Math.abs(c.lat).toFixed(2)} ${c.lat < 0 ? 'S' : 'N'}, ${Math.abs(c.lng).toFixed(2)} ${c.lng < 0 ? 'W' : 'E'}`); });
@@ -36,6 +38,7 @@ export function MapView({ feature }: { feature: Feature | null }) {
   useEffect(() => {
     if (!loaded || !map.current) return;
     (map.current.getSource('selected') as maplibregl.GeoJSONSource).setData(feature ? { type: 'Feature', properties: {}, geometry: feature.geometry } : { type: 'FeatureCollection', features: [] });
+    (map.current.getSource('endpoints') as maplibregl.GeoJSONSource).setData({ type: 'FeatureCollection', features: (['source', 'mouth'] as const).flatMap(kind => feature?.[kind] ? [{ type: 'Feature' as const, properties: { kind }, geometry: { type: 'Point' as const, coordinates: feature[kind]!.coordinates } }] : []) });
     if (feature) map.current.fitBounds(feature.bbox, { padding: 65, maxZoom: 13, duration: 900 });
     const resize = new ResizeObserver(() => {
       map.current?.resize();

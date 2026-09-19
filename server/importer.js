@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import { publicJson } from './network.js';
 import { normalize } from './store.js';
+import { extendGeofabric, isGeofabric } from './geofabric.js';
 
-export async function importSource(source, query, load = publicJson, identity = {}) {
+export async function importSource(source, query, load = publicJson, identity = {}, context = {}) {
   if (source.status !== 'approved') throw new Error('Source is not approved.');
   const terms = [...new Set([query, ...(identity.aliases || [])].map(normalize))];
   let records = [], metadata = {}, truncated = false;
@@ -50,5 +51,6 @@ export async function importSource(source, query, load = publicJson, identity = 
   }
   if (records.length > 25000) throw new Error('Too many records for one feature.');
   const payload = { type: 'FeatureCollection', features: records };
-  return { payload, metadata: { ...metadata, queryTerms: terms }, truncated, checksum: createHash('sha256').update(JSON.stringify(payload)).digest('hex') };
+  const imported = { payload, metadata: { ...metadata, queryTerms: terms }, truncated, checksum: createHash('sha256').update(JSON.stringify(payload)).digest('hex') };
+  return isGeofabric(source) ? extendGeofabric(imported, load, context.progress) : imported;
 }

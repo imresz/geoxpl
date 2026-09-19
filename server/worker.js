@@ -16,7 +16,7 @@ export function createWorker(store, options = {}) {
     store.updateJob(job.id, 'pending', 'importing', 'Checking approved geographic sources');
     for (const source of sources) {
       try {
-        const imported = await importer(source, job.query, undefined, settings);
+        const imported = await importer(source, job.query, undefined, settings, { progress: message => store.updateJob(job.id, 'pending', 'importing', message) });
         const id = store.addImport(source.id, job.id, imported.checksum, imported.payload, { ...imported.metadata, truncated: imported.truncated });
         imports.push({ ...imported, source, id });
         store.event(job.id, 'imported', `${source.name}: ${imported.payload.features.length} records`);
@@ -36,7 +36,7 @@ export function createWorker(store, options = {}) {
     if (output.result?.mainStem && !forceResearch) {
       const candidate = output.result.mainStem.status === 'candidate';
       store.event(job.id, 'main_stem_processed', candidate ? `Candidate: ${output.result.lengthKm.toFixed(1)} km; ${output.result.mainStem.componentRoutes.length} separate component routes. Not verified.` : output.result.mainStem.reason);
-      return store.updateJob(job.id, output.status, 'awaiting_data', candidate ? 'Main-stem candidate prepared. Verified branch choices, endpoints and any missing connections are still needed.' : output.result.mainStem.reason, featureId);
+      return store.updateJob(job.id, output.status, 'awaiting_data', output.result.method === 'geofabric_directed_main_stem' ? output.result.warnings.join(' ') : candidate ? 'Main-stem candidate prepared. Verified branch choices, endpoints and any missing connections are still needed.' : output.result.mainStem.reason, featureId);
     }
     const diagnostics = { settings, status: output.status, warnings: output.result?.warnings || [], identity: output.result?.identity, mainStem: output.result?.mainStem, selectedSourceId: output.result?.selection.sourceId, comparisons: output.comparisons, importFailures: failures };
     const relevant = output.result ? sources.filter(s => s.id === output.result.selection.sourceId) : sources;

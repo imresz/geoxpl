@@ -11,18 +11,19 @@ GeoXpl opens on a map of southeastern Australia. Enter a feature name, select **
 - Password-protected administration at `/admin`, with source and research approval/rejection, editable source settings, job retry and processing activity.
 - Named-feature import from approved ArcGIS layers and HTTPS GeoJSON collections. Raw import snapshots, checksums, source IDs and derivation history are retained.
 - Per-feature approved aliases and source selection; conservative river identity, connectivity and branch checks; published valley polygon import.
+- BoM Geofabric directed river routes, with published headwater/terminal nodes, flow decisions and source-record provenance.
 - Optional OpenAI web research producing structured recommendations and candidate sources. AI calls are rate limited. New sources require separate approval.
 - Without AI credentials, the worker produces an explicit configuration report. For rivers it can inspect a known official Vicmap Hydro catalogue entry and propose it for review. This is a catalogue lookup, not AI research.
 
 ## Current limits
 
-This is a local pilot, not yet a general geographic inference engine. It does not invent missing geometry. It now extracts geometric main-stem candidates, but does not implement automated hydrological adjudication, flow direction inference, terrain-derived valleys or interactive selection between distinct same-named features within the pilot region. Disconnected or branching networks and multiple matching valley polygons remain partial until sufficient geographic evidence exists. Source and mouth are left unset until evidence establishes their meaning. Line geometry means a feature's path, not turn-by-turn navigation.
+This is a local pilot, not yet a general geographic inference engine. It does not invent missing geometry. It can follow published BoM Geofabric flow connectivity, or extract an unverified geometric main-stem candidate from other river datasets. It does not infer flow direction from terrain, derive valleys, identify arbitrary tributary mouths at confluences, or offer interactive selection between distinct same-named features. Unresolved gaps and branch choices remain partial. Endpoint labels explicitly distinguish BoM network nodes from independently surveyed physical source/mouth positions. Line geometry is not turn-by-turn navigation.
 
-Each source is processed independently. River components must intersect Victoria or its 2 km border tolerance; connected reaches are retained beyond the border, not clipped. Additional components within 100 metres of selected endpoints can be associated as possible continuations, but their gaps remain unchanged and the result stays partial. Remote disconnected namesakes are excluded. Identity decisions and excluded-record counts are retained in the feature's processing evidence. This is conservative eligibility checking, not proof of river identity or completeness.
+Each source is processed independently. River components must intersect Victoria or its 2 km border tolerance; connected reaches are retained beyond the border, not clipped. For generic named networks, additional components within 100 metres of selected endpoints can be associated as possible continuations, but their gaps remain unchanged and the result stays partial. The Geofabric adapter instead requires published node connectivity and matching endpoint coordinates. Remote disconnected namesakes are excluded. Identity decisions and excluded-record counts are retained in the feature's processing evidence. Geographic eligibility alone is not proof of river identity or completeness.
 
 Only one dataset supplies a feature's displayed geometry and length. Automatic selection prefers a resolved candidate, then the candidate with the widest geographic span. Administration can override this per feature. Other sources remain comparisons; overlapping national and regional representations are never added together. A failed comparison download does not invalidate a complete result from a different selected source. A failed explicitly selected source does not silently fall back to another dataset.
 
-Only a connected, unbranched river path or a single valid polygon from a source explicitly reviewed as supplying complete named features can be published as resolved. Partial geometry is stored and can be inspected by choosing **View available geometry**; it is never automatically shown as a complete feature. Do not mark a regional river dataset complete merely to bypass this check. A first Murray River search may need several approved datasets and further processing capability before a full result is possible.
+Generic imports require a connected, unbranched river path or a single valid polygon from a source explicitly reviewed as supplying complete named features before publication as resolved. Geofabric uses the feature-level network checks below instead, and publishes qualified **derived network routes**, not surveyed extents. An explicitly partial source still prevents resolution. Partial geometry can be inspected using **View available geometry**; it is never automatically shown as complete. Do not mark a regional dataset complete merely to bypass a check.
 
 The simplified Victoria outline is from geoBoundaries, CC BY 4.0; exact metadata is in `public/boundary-source.json`. Its scope checks are suitable for this pilot, not cadastral or border-sensitive decisions. The catalogue and source registry initially contain no approved feature data. A source catalogue URL in the researcher is a discovery hint only.
 
@@ -72,13 +73,38 @@ AI receives the feature name/type, processing gaps and registered source metadat
 
 **Mark reviewed** records a research decision; it does not execute recommendations or retry the job. Reviewing the latest report moves a waiting request to **Needs geographic evidence**, retaining its current outcome and geometry. Older reports cannot change the current processing stage. **Retry** checks the sources again, but reuses research for unchanged selected-source evidence. Outages or changes in comparison-only sources do not demand another review. Unchanged raw snapshots are reused. **New research** explicitly requests a fresh report and confirms possible API charges. Source approval remains separate.
 
-### Main-stem candidates
+### BoM Geofabric routes
+
+Configure the approved river source as follows. The AWDS catalogue/search page is a discovery page, not an import endpoint.
+
+| Setting | Value |
+| --- | --- |
+| Format | ArcGIS |
+| Layer URL | `https://hosting.wsapi.cloud.bom.gov.au/arcgis/rest/services/ahgf/Geofabric_V3x_All_Products/MapServer/6` |
+| Name field | `name` |
+| Object-ID field | `objectid` |
+| Version | `3.3` |
+| Licence | Creative Commons Attribution 4.0 International (CC BY 4.0) |
+| Attribution | Commonwealth of Australia (Bureau of Meteorology) 2022 |
+| Completeness | Unknown; evaluate the requested route, not all rivers globally |
+
+The adapter also reads endpoint nodes from layer `3` and preferred-flow records from table `37` in the same service. See the [BoM licence and access page](https://www.bom.gov.au/water/geofabric/download.shtml) and [product guide](https://www.bom.gov.au/water/geofabric/documents/v3_0/ahgf_productguide_V3_0_release.pdf). It uses the unfiltered **NetworkStream - All** layer, not the display layer that omits minor/unnamed connections.
+
+For Murray River, approve the feature alias `River Murray` and select this source under the request's feature settings. Exact name matches seed the import; published `nextdownid` links add downstream records, including modelled waterbody connections. At a junction, continuity of the requested name takes priority over another named watercourse. Published preferred-flow IDs, then downstream IDs, resolve remaining choices. The processor never chooses a branch by shortest distance. These are explicit application rules applied to publisher data, not a publisher-certified main-stem designation.
+
+Resolution requires exactly one in-scope named headwater route, known flow directions, consistent node IDs and coordinates, a classified headwater and terminal node, and an end-of-network marker. Missing referenced records, cycles, ambiguous branches, multiple headwaters or gaps keep the result partial. At least 95% of route length must match the requested name/approved aliases; this conservative screen prevents long continuations through another river, but is not independent proof of identity. Tributaries ending at an internal confluence need further endpoint logic. There is no river-name or coordinate-specific shortcut in the processor.
+
+Imports are bounded at 10,000 segments and 500 downstream expansion rounds, with supporting queries batched at 50 IDs. Raw geometry, endpoint records and preferred-flow evidence are retained together in a checksum-covered snapshot. Every chosen segment and branch decision remains inspectable. No coordinates are snapped, bridged or added from another source.
+
+Resolved results have confidence `derived_published_network`. The map shows **km of BoM modelled flow path**, green/red network endpoints and dataset limitations. Geofabric's terrain-derived route, including waterbody connections, is not a surveyed river centreline or independently verified physical source-to-mouth boundary. Its measured length can differ substantially from conventional published river lengths. Generic candidate processing below remains available for other sources.
+
+### Generic main-stem candidates
 
 For branching river networks, the processor now builds a distance-weighted graph from exact shared coordinate vertices. It compresses degree-two chains, uses Graphology's Dijkstra routing, and selects the longest of the shortest routes between open endpoints in each connected component. This removes side branches and chooses shorter alternatives through braids. Routing is bounded at 250,000 vertices overall, and 128 endpoints / 512 junctions per component; closed networks or larger graphs remain unresolved with an explicit reason.
 
 This is a **geometric candidate**, not a verified hydrological main stem. The longest endpoint route can choose the wrong headwater or distributary; the shortest braided route can choose the wrong channel. No flow direction, source or mouth is inferred as fact. No coordinate snapping, intersection noding, lake connectors, gap bridging or cross-source stitching is performed. Separate components remain separate. Evidence refers only to records contributing to the candidate; original imports and the full named network remain available. In the map, switch between **Main-stem candidate** and **Named network**. Measurements refer to the selected view, not a certified river length.
 
-A candidate stays partially resolved and out of the resolved catalogue, even when the source's coverage is marked complete. Candidate processing stops at **Needs geographic evidence** without automatically creating another AI report. Explicit **New research** remains available. Verified branch/flow evidence, endpoint identification and source-backed missing connectors are the next requirements for a publishable source-to-mouth route.
+A candidate stays partially resolved and out of the resolved catalogue, even when the source's coverage is marked complete. Candidate processing stops at **Needs geographic evidence** without automatically creating another AI report. Explicit **New research** remains available. A suitable directed dataset such as Geofabric can provide the additional flow, endpoint and connector evidence; changing an approval label alone cannot.
 
 Imports use exact case-insensitive matching of the submitted name and approved aliases for that feature. Sources must use public HTTPS addresses; private network URLs, redirects and oversized responses are rejected. ArcGIS imports union object IDs across names and retrieve at most 100 records per batch, shortening batches further to keep request URLs within 1,800 characters. Imports are limited to 25,000 records; GeoJSON responses are limited to 20 MB. Import limits and unsupported formats produce reviewable failures.
 
