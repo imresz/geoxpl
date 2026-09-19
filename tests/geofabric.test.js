@@ -211,7 +211,7 @@ test('confluence imports retain complete adjacent evidence separately and checks
     assert.fail('Unexpected URL');
   };
   const imported = await extendGeofabric(seeds, load);
-  assert.equal(imported.metadata.geofabric.version, 'geofabric-network/2');
+  assert.equal(imported.metadata.geofabric.version, 'geofabric-network/3');
   assert.ok(calls.some(url => url.searchParams.get('where') === 'to_node IN (3)'));
   assert.ok(calls.some(url => url.searchParams.get('where') === 'from_node IN (3)'));
   assert.ok(!imported.payload.features.some(f => f.properties.hydroid === 20));
@@ -263,5 +263,73 @@ test('directed completion saves a reusable feature without AI research or a revi
     await worker.run(job);
     assert.equal(store.getJob(job.id).status, 'resolved'); assert.equal(store.getJob(job.id).phase, 'completed');
     assert.equal(store.reports().length, 0); assert.equal(store.feature(store.getJob(job.id).feature_id).source.nodeId, 1);
+  } finally { store.close(); }
+});
+
+test('only official equivalent stream endpoints invoke directed processing', () => {
+  assert.equal(isGeofabric(source), true);
+  const item = fixture(); item.source = { ...source, url: source.url.replace('/MapServer/', '/FeatureServer/') + '/' };
+  assert.equal(isGeofabric(item.source), true);
+  assert.equal(processGeometry({ query: 'Test River', type: 'river' }, [item], boundary).result.method, 'geofabric_directed_main_stem');
+  for (const url of [source.url.replace('/6', '/24'), source.url + '?f=json', source.url.replace('https:', 'http:'), source.url.replace('bom.gov.au', 'bom.gov.au.example.com')]) assert.equal(isGeofabric({ ...source, url }), false);
+});
+
+async function namedReachFixture() {
+  const original = fixture(); original.metadata.geofabric.nodes[0].properties.ahgfftype = 4;
+  const incoming = [line(31, 7, 1, 11, [[0.5,1],[1,1]], ''), line(32, 8, 1, 11, [[1,0.5],[1,1]], '')];
+  const streams = [...original.payload.features, ...incoming];
+  const nodes = [...original.metadata.geofabric.nodes, node(7,9,[0.5,1]), node(8,9,[1,0.5])];
+  const seeds = structuredClone(original); seeds.payload.features = seeds.payload.features.slice(0,2);
+  const load = async input => {
+    const url = new URL(input), where = url.searchParams.get('where');
+    const [field] = where.split(' '), ids = where.match(/\((.*)\)/)[1].split(',').map(Number);
+    if (url.pathname.endsWith('/6/query')) return { features: streams.filter(f => ids.includes(f.properties[field])) };
+    if (url.pathname.endsWith('/3/query')) return { features: nodes.filter(f => ids.includes(f.properties.hydroid)) };
+    if (url.pathname.endsWith('/37/query')) return { features: [] };
+    assert.fail('Unexpected URL');
+  };
+  return extendGeofabric(seeds, load);
+}
+
+test('an upstream identity gap produces a partial directed named reach, never an invented headwater', async () => {
+  const item = await namedReachFixture(), result = trace(item);
+  assert.equal(result.status, 'partially_resolved');
+  assert.equal(result.source, null); assert.equal(result.mouth.nodeId, 4);
+  assert.deepEqual(result.mainStem.selectedHydroIds, [11,12,14]);
+  assert.equal(result.mainStem.namedStart.nodeId, 1);
+  assert.equal(result.mainStem.headwater.status, 'unverified_named_start');
+  assert.deepEqual(result.mainStem.headwater.upstreamHydroIds, [31,32]);
+  assert.match(result.warnings.join(' '), /2 upstream stream\(s\).*none has been appended/);
+  assert.equal(item.payload.features.length, 4);
+  assert.equal(result.headwaterNodes.length, 2);
+  assert.equal(item.checksum, createHash('sha256').update(JSON.stringify({ payload: item.payload, trace: item.metadata.geofabric })).digest('hex'));
+  const processed = processGeometry({ query: 'Test River', type: 'river' }, [item], boundary).result;
+  assert.deepEqual(processed.evidence.filter(e => e.role === 'headwater_identity_support').map(e => e.hydroId), [31,32]);
+  assert.equal(processed.evidence.filter(e => e.role === 'upstream_node_support').length, 2);
+  assert.equal(processed.evidence.filter(e => e.role === 'endpoint').length, 1);
+  assert.equal(processed.evidence.filter(e => e.role === 'named_start').length, 1);
+  assert.ok(!('headwaterRecords' in processed));
+  item.source = { ...source, completeness: 'complete' };
+  assert.equal(processGeometry({ query: 'Test River', type: 'river' }, [item], boundary).status, 'partially_resolved');
+});
+
+test('one unnamed upstream branch still requires identity evidence; absent start evidence cannot be claimed', async () => {
+  const item = await namedReachFixture(); item.metadata.geofabric.headwaterContexts[0].incoming.pop();
+  assert.equal(trace(item).status, 'partially_resolved'); assert.equal(trace(item).source, null);
+  item.metadata.geofabric.headwaterContexts = [];
+  assert.match(trace(item).error, /No route/);
+});
+
+test('partial named-reach processing waits for specific evidence without repeating AI review', async () => {
+  const item = await namedReachFixture(), store = createStore(':memory:');
+  try {
+    const id = store.addSource(source); store.decideSource(id, 'approved', source);
+    const job = store.request('Test River', 'river');
+    const worker = createWorker(store, { boundary, importer: async () => item, researcher: async () => assert.fail('No repeated AI report') });
+    worker.stop(); await worker.run(job);
+    assert.equal(store.getJob(job.id).phase, 'awaiting_data');
+    assert.equal(store.getJob(job.id).status, 'partially_resolved');
+    assert.match(store.getJob(job.id).message, /upstream stream/);
+    assert.equal(store.reports().length, 0);
   } finally { store.close(); }
 });
