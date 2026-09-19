@@ -5,6 +5,7 @@ import { LocateFixed, Maximize, MapPin } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 const INITIAL: [number, number, number, number] = [137.5, -40.8, 151.2, -32.5];
+const FEATURE_PADDING = { top: 70, right: 60, bottom: 110, left: 55 };
 export function MapView({ feature }: { feature: Feature | null }) {
   const element = useRef<HTMLDivElement>(null), map = useRef<maplibregl.Map | null>(null);
   const [loaded, setLoaded] = useState(false), [error, setError] = useState(''), [center, setCenter] = useState('37.10 S, 144.35 E');
@@ -39,10 +40,10 @@ export function MapView({ feature }: { feature: Feature | null }) {
     if (!loaded || !map.current) return;
     (map.current.getSource('selected') as maplibregl.GeoJSONSource).setData(feature ? { type: 'Feature', properties: {}, geometry: feature.geometry } : { type: 'FeatureCollection', features: [] });
     (map.current.getSource('endpoints') as maplibregl.GeoJSONSource).setData({ type: 'FeatureCollection', features: (['source', 'mouth'] as const).flatMap(kind => feature?.[kind] ? [{ type: 'Feature' as const, properties: { kind }, geometry: { type: 'Point' as const, coordinates: feature[kind]!.coordinates } }] : []) });
-    if (feature) map.current.fitBounds(feature.bbox, { padding: 65, maxZoom: 13, duration: 900 });
+    if (feature) map.current.fitBounds(feature.bbox, { padding: FEATURE_PADDING, maxZoom: 13, duration: 900 });
     const resize = new ResizeObserver(() => {
       map.current?.resize();
-      map.current?.fitBounds(feature?.bbox || INITIAL, { padding: 35, maxZoom: 13, duration: 0 });
+      map.current?.fitBounds(feature?.bbox || INITIAL, { padding: feature ? FEATURE_PADDING : 35, maxZoom: 13, duration: 0 });
     });
     if (element.current) resize.observe(element.current);
     return () => resize.disconnect();
@@ -51,7 +52,7 @@ export function MapView({ feature }: { feature: Feature | null }) {
     <div className="map-canvas" ref={element} />
     <div className="map-location"><MapPin size={14}/><span>{feature ? feature.name : 'Southeastern Australia'}</span></div>
     <div className="map-tools">
-      <button title="Fit selected feature" aria-label="Fit selected feature" onClick={() => map.current?.fitBounds(feature?.bbox || INITIAL, { padding: 50 })}><Maximize size={18}/></button>
+      <button title="Fit selected feature" aria-label="Fit selected feature" onClick={() => map.current?.fitBounds(feature?.bbox || INITIAL, { padding: feature ? FEATURE_PADDING : 50 })}><Maximize size={18}/></button>
       <button title="Return to Victoria" aria-label="Return to Victoria" onClick={() => map.current?.fitBounds(INITIAL, { padding: 40 })}><LocateFixed size={18}/></button>
     </div>
     {error && <div className="map-error" role="status">{error}<button aria-label="Dismiss map message" onClick={() => setError('')}>×</button></div>}
