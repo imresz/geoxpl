@@ -33,6 +33,10 @@ export function createWorker(store, options = {}) {
     if (output.result) featureId = store.saveFeature(job, output.result).id;
     else store.invalidateFeature(job.id, 'No current usable geometry. Review identity and source selection.');
     if (output.status === 'resolved') return store.updateJob(job.id, 'resolved', 'completed', 'Feature ready', featureId);
+    if (output.result?.interpolations?.features.length && !forceResearch) {
+      store.event(job.id, 'interpolated_connections', `${output.result.interpolations.features.length} estimated connections retained separately from recorded geometry.`);
+      return store.updateJob(job.id, output.status, 'awaiting_data', 'Map available with dotted, interpolated connections. These are estimates; the full extent is not verified.', featureId);
+    }
     if (output.result?.mainStem && !forceResearch) {
       const candidate = output.result.mainStem.status === 'candidate';
       store.event(job.id, 'main_stem_processed', candidate ? `Candidate: ${output.result.lengthKm.toFixed(1)} km; ${output.result.mainStem.componentRoutes.length} separate component routes. Not verified.` : output.result.mainStem.reason);

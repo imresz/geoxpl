@@ -4,8 +4,9 @@ import { bbox, length, area, feature, booleanValid, booleanIntersects, buffer, d
 import { mainStemCandidate } from './main-stem.js';
 import { isGeofabric, traceGeofabric } from './geofabric.js';
 import { normalize } from './store.js';
+import { withInterpolations } from './interpolation.js';
 
-export const algorithmVersion = 'directed-geofabric/4.2.0';
+export const algorithmVersion = 'directed-geofabric/4.3.0';
 const scopeRegions = new WeakMap();
 export function validCoordinates(geometry) {
   let count = 0;
@@ -168,6 +169,7 @@ export function processGeometry(job, imports, boundary, settings = {}) {
     status: job.type === 'valley' && !imports.length ? 'missing_capability' : 'insufficient_data', comparisons,
     message: settings.preferredSourceId ? 'The selected source did not provide usable, in-scope geometry. Review source selection.' : 'No usable named geometry associated with Victoria was found.'
   };
-  const result = { ...chosen.result, selection: { sourceId: chosen.sourceId, mode: settings.preferredSourceId ? 'administrator' : 'resolved_then_widest_coverage', comparisons } };
+  const selected = { ...chosen.result, selection: { sourceId: chosen.sourceId, mode: settings.preferredSourceId ? 'administrator' : 'resolved_then_widest_coverage', comparisons } };
+  const result = withInterpolations(selected, imports.find(i => i.source.id === chosen.sourceId), settings);
   return { status: result.status, message: result.status === 'resolved' ? 'Feature ready' : 'Available geometry needs review before it can be shown as the complete feature.', result, comparisons };
 }

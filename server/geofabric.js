@@ -143,7 +143,7 @@ export function traceGeofabric(item, boundary, terms) {
   const candidates = [];
   for (const head of heads) {
     let current = head.properties.hydroid, previous = null, failure = null, confluence = null;
-    const path = [], decisions = [], seen = new Set();
+    const path = [], decisions = [], seen = new Set(), gaps = [];
     while (path.length < limit) {
       const mouth = confluenceAt(previous, junctions.get(current), nodes.get(current), terms, byId);
       if (mouth?.error) { failure = mouth.error; break; }
@@ -165,9 +165,10 @@ export function traceGeofabric(item, boundary, terms) {
       try {
         const coordinates = oriented(next);
         const last = path.at(-1)?.coordinates.at(-1);
-        if (last && distance(last, coordinates[0]) > 0.000001) throw Error(`Published segments have a coordinate gap at node ${current}; no bridge was invented.`);
+        const gap = last && distance(last, coordinates[0]) > 0.000001;
+        if (gap) gaps.push(current);
         if (!last && (head.geometry?.type !== 'Point' || distance(head.geometry.coordinates, coordinates[0]) > 0.000001)) throw Error('Published head node does not match the stream geometry.');
-        path.push({ record: next, coordinates }); seen.add(p.hydroid);
+        path.push({ record: next, coordinates, gap }); seen.add(p.hydroid);
       } catch (e) { failure = e.message; break; }
       if (choices.length > 1) decisions.push({ nodeId: current, selectedHydroId: p.hydroid, rule: preferred ? 'published_preferred_flow' : matching.length === 1 ? 'named_river_continuity' : 'published_next_down_id', alternativeHydroIds: choices.filter(f => f !== next).map(f => f.properties.hydroid) });
       current = p.to_node; previous = next;
@@ -175,6 +176,7 @@ export function traceGeofabric(item, boundary, terms) {
     if (!path.length || !path.some(p => named(p.record, terms) && booleanIntersects(p.record, region))) continue;
     const outlet = nodes.get(current);
     const warnings = failure ? [failure] : [];
+    if (gaps.length) warnings.push(`Published segments have a coordinate gap at ${gaps.length} network node(s). Recorded sections remain separate; any connecting overlay is an estimate.`);
     const verifiedHeadwater = head.properties.ahgfftype === 9;
     const headwaterContext = verifiedHeadwater ? null : headwaterContexts.get(head.properties.hydroid);
     if (!verifiedHeadwater) warnings.push(`The named reach starts at BoM node ${head.properties.hydroid}, not a classified headwater. ${headwaterContext.incoming.length} upstream stream(s) require river-identity evidence; none has been appended. The full source-to-mouth extent remains unverified.`);
@@ -198,8 +200,14 @@ export function traceGeofabric(item, boundary, terms) {
   }
   const candidate = candidates[0];
   const route = candidate.path.map(p => p.record);
-  const coordinates = candidate.path.flatMap((p, i) => i ? p.coordinates.slice(1) : p.coordinates);
-  const geometry = { type: 'LineString', coordinates }, shape = feature(geometry);
+  const parts = [];
+  for (const p of candidate.path) {
+    if (!parts.length || p.gap) parts.push([...p.coordinates]);
+    else parts.at(-1).push(...p.coordinates.slice(1));
+  }
+  const coordinates = parts.flat();
+  const geometry = parts.length === 1 ? { type: 'LineString', coordinates: parts[0] } : { type: 'MultiLineString', coordinates: parts };
+  const shape = feature(geometry);
   const endpoint = (node, label) => node ? { coordinates: node.geometry.coordinates, nodeId: node.properties.hydroid, objectId: node.id ?? node.properties.objectid, sourceUrl: trace.nodesUrl, classification: label } : null;
   const { records: confluenceRecords = [], ...termination } = candidate.confluence || { kind: candidate.outlet ? 'network_terminus' : 'unverified', nodeId: candidate.outlet?.properties.hydroid };
   const mouth = endpoint(candidate.outlet, candidate.confluence ? 'BoM river confluence' : 'BoM network terminus');
@@ -209,9 +217,18 @@ export function traceGeofabric(item, boundary, terms) {
   const namedStart = candidate.verifiedHeadwater ? null : endpoint(candidate.head, 'BoM named reach start (headwater unverified)');
   return {
     geometry, bbox: bbox(shape), records: route, confluenceRecords, headwaterRecords, headwaterNodes, source: candidate.verifiedHeadwater ? endpoint(candidate.head, 'BoM network headwater') : null, mouth,
-    graph: { components: 1, branchJunctions: 0, endpoints: [coordinates[0], coordinates.at(-1)] },
+    graph: { components: parts.length, branchJunctions: 0, endpoints: parts.flatMap(p => [p[0], p.at(-1)]) },
     identity: { excludedRecords: records.length - route.length, scopeBufferKm: 2, namedLengthFraction: candidate.nameFraction },
-    mainStem: { status: candidate.warnings.length ? 'candidate' : 'published_network', method: 'named_directed_geofabric', namedStart, headwater: { status: candidate.verifiedHeadwater ? 'published_headwater' : 'unverified_named_start', upstreamHydroIds: headwaterRecords.map(f => f.properties.hydroid) }, termination, componentRoutes: [{ endpoints: [coordinates[0], coordinates.at(-1)], lengthKm: length(shape) }], branchDecisions: candidate.decisions, preferencesUrl: trace.preferencesUrl, usedPreferences: trace.preferences.filter(p => candidate.decisions.some(d => d.rule === 'published_preferred_flow' && d.nodeId === p.nodeid)), selectedHydroIds: route.map(f => f.properties.hydroid), limitations: ['BoM terrain-derived flow path, including modelled waterbody connections. Not a surveyed centreline or a navigation route.', 'Endpoint labels refer to published network nodes, not independently surveyed physical source or mouth positions.'] },
+    mainStem: {
+      status: candidate.warnings.length ? 'candidate' : 'published_network', method: 'named_directed_geofabric', namedStart,
+      headwater: { status: candidate.verifiedHeadwater ? 'published_headwater' : 'unverified_named_start', upstreamHydroIds: headwaterRecords.map(f => f.properties.hydroid) },
+      termination, componentRoutes: parts.map(coordinates => ({ endpoints: [coordinates[0], coordinates.at(-1)], lengthKm: length(feature({ type: 'LineString', coordinates })) })),
+      branchDecisions: candidate.decisions, preferencesUrl: trace.preferencesUrl,
+      coordinateGaps: candidate.path.flatMap((p, i) => p.gap ? [{ coordinates: [candidate.path[i - 1].coordinates.at(-1), p.coordinates[0]], nodeId: p.record.properties.from_node }] : []),
+      usedPreferences: trace.preferences.filter(p => candidate.decisions.some(d => d.rule === 'published_preferred_flow' && d.nodeId === p.nodeid)),
+      selectedHydroIds: route.map(f => f.properties.hydroid),
+      limitations: ['BoM terrain-derived flow path, including modelled waterbody connections. Not a surveyed centreline or a navigation route.', 'Endpoint labels refer to published network nodes, not independently surveyed physical source or mouth positions.']
+    },
     warnings: candidate.warnings,
     status: candidate.warnings.length ? 'partially_resolved' : 'resolved'
   };

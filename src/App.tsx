@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Compass, Search, ArrowUpRight, Waves, Mountain, Database, LoaderCircle, ArrowLeft, Check, Clock3, ShieldCheck, X, Info } from 'lucide-react';
 import { MapView } from './MapView';
-import { api, statusLabel, type Job, type Feature } from './api';
+import { api, statusLabel, type Job, type Feature, type Interpolation } from './api';
 import { Admin } from './Admin';
 
 export function Brand() { return <a className="brand" href="/"><span className="brand-symbol"><Compass size={23}/></span><span>Geo<span className="brand-accent">Xpl</span></span></a>; }
@@ -10,8 +10,9 @@ export function App() {
   const [selected, setSelected] = useState<Feature | null>(null), [tab, setTab] = useState('explore'), [catalogue, setCatalogue] = useState<Feature[]>([]), [elapsed, setElapsed] = useState(0);
   const active = useRef<AbortController | null>(null);
   const [showNetwork, setShowNetwork] = useState(false);
-  useEffect(() => { setShowNetwork(false); }, [selected]);
-  const displayedFeature = useMemo(() => selected && showNetwork && selected.recordedNetwork ? { ...selected, geometry: selected.recordedNetwork.geometry, bbox: selected.recordedNetwork.bbox } : selected, [selected, showNetwork]);
+  const [focusedEstimate, setFocusedEstimate] = useState<Interpolation | null>(null);
+  useEffect(() => { setShowNetwork(false); setFocusedEstimate(null); }, [selected]);
+  const displayedFeature = useMemo(() => selected && showNetwork && selected.recordedNetwork ? { ...selected, geometry: selected.recordedNetwork.geometry, bbox: selected.recordedNetwork.bbox, displayBbox: selected.recordedNetwork.bbox, interpolations: undefined } : selected, [selected, showNetwork]);
   const refreshCatalogue = () => api<Feature[]>('/catalogue').then(setCatalogue).catch(() => {});
   useEffect(() => { refreshCatalogue(); return () => active.current?.abort(); }, []);
   async function search(event?: React.FormEvent, requested?: { query: string; type: string }) {
@@ -29,7 +30,7 @@ export function App() {
         if (controller.signal.aborted) break;
         current = await api<Job>(`/jobs/${current.id}`, 'GET', undefined, controller.signal); setJob(current);
       }
-      if (current.status === 'resolved' && current.feature && !controller.signal.aborted) { setSelected(current.feature); refreshCatalogue(); }
+      if (current.feature && (current.status === 'resolved' || current.feature.interpolations?.features.length) && !controller.signal.aborted) { setSelected(current.feature); refreshCatalogue(); }
     } catch (e) { if (!controller.signal.aborted) setError((e as Error).message); }
     finally { clearTimeout(timeout); clearInterval(clock); if (active.current === controller) { setWaiting(false); setElapsed(5); } }
   }
@@ -51,9 +52,11 @@ export function App() {
           {selected.recordedNetwork && <div className="geometry-modes" role="group" aria-label="River geometry"><button aria-pressed={!showNetwork} onClick={() => setShowNetwork(false)}>Main-stem candidate</button><button aria-pressed={showNetwork} onClick={() => setShowNetwork(true)}>Named network</button></div>}
           <div className="measure"><strong>{(showNetwork ? selected.recordedNetwork?.lengthKm : selected.lengthKm)?.toFixed(1) || selected.areaKm2?.toFixed(1)}</strong><span>{selected.type === 'river' ? selected.method === 'geofabric_directed_main_stem' ? 'km of BoM modelled flow path' : selected.mainStem?.status === 'candidate' && !showNetwork ? 'km of unverified candidate' : 'km of recorded watercourse' : 'km² recorded extent'}</span></div>
           {selected.mainStem?.limitations && <details className="candidate-limits"><summary>{selected.mainStem.status === 'candidate' ? 'Candidate limitations' : 'Dataset limitations'}</summary>{selected.mainStem.limitations.map((text, i) => <p className="muted small" key={i}>{text}</p>)}</details>}
+          {!!selected.interpolations?.features.length && !showNetwork && <div className="detail-section estimated-connections"><h2>Interpolated connections</h2><p className="muted small">Approximate paths. Excluded from recorded measurements.</p>{selected.interpolations.features.some(f => f.properties.alternativeGroup) && <p className="muted small">Upstream alternatives are possibilities, not a chosen route.</p>}{selected.interpolations.features.map(gap => <button key={gap.properties.id} className="estimate-focus" title={`Show ${gap.properties.label} on map`} onClick={() => setFocusedEstimate({ ...gap })}><span className="legend-interpolated"/><span>{gap.properties.label}<small>{gap.properties.lengthKm.toFixed(2)} km estimated</small></span><ArrowUpRight size={15}/></button>)}</div>}
+          {selected.interpolationSummary?.notes.map((note, i) => <p key={`interpolation-${i}`} className="warning"><Info size={15}/>{note}</p>)}
           {(selected.source || selected.mouth) && <div className="detail-section"><h2>Network endpoints</h2>{[selected.source, selected.mouth].filter(Boolean).map(endpoint => endpoint && <div className="network-endpoint" key={endpoint.nodeId}><span className={`endpoint-dot ${endpoint === selected.mouth ? 'outlet' : ''}`}/><span><strong>{endpoint.classification}</strong>{endpoint.receivingRiver && <small>Joins {endpoint.receivingRiver}</small>}<small>{endpoint.coordinates[1].toFixed(5)}, {endpoint.coordinates[0].toFixed(5)}</small></span></div>)}</div>}
           {selected.warnings.map((w, i) => <p className="warning" key={i}><Info size={15}/>{w}</p>)}
-          <div className="detail-section"><h2>Provenance</h2>{selected.evidence.filter((e, i, all) => all.findIndex(other => other.sourceId === e.sourceId) === i).map(e => <a key={e.sourceId} className="source-link" href={e.sourceUrl} target="_blank" rel="noreferrer"><span>{e.sourceName}<small>{e.licence}</small></span><ArrowUpRight size={16}/></a>)}<dl><dt>Source records</dt><dd>{selected.evidence.length}</dd><dt>Method</dt><dd>{selected.method.replaceAll('_', ' ')}</dd><dt>Processed</dt><dd>{new Date(selected.created).toLocaleDateString()}</dd></dl><details><summary>Processing evidence</summary><pre>{JSON.stringify({ id: selected.id, algorithm: selected.algorithmVersion, identity: selected.identity, selection: selected.selection, mainStem: selected.mainStem, source: selected.source, mouth: selected.mouth, evidence: selected.evidence }, null, 2)}</pre></details></div>
+          <div className="detail-section"><h2>Provenance</h2>{selected.evidence.filter((e, i, all) => all.findIndex(other => other.sourceId === e.sourceId) === i).map(e => <a key={e.sourceId} className="source-link" href={e.sourceUrl} target="_blank" rel="noreferrer"><span>{e.sourceName}<small>{e.licence}</small></span><ArrowUpRight size={16}/></a>)}<dl><dt>Source records</dt><dd>{selected.evidence.length}</dd><dt>Method</dt><dd>{selected.method.replaceAll('_', ' ')}</dd><dt>Processed</dt><dd>{new Date(selected.created).toLocaleDateString()}</dd></dl><details><summary>Processing evidence</summary><pre>{JSON.stringify({ id: selected.id, algorithm: selected.algorithmVersion, identity: selected.identity, selection: selected.selection, mainStem: selected.mainStem, source: selected.source, mouth: selected.mouth, evidence: selected.evidence, interpolations: selected.interpolations, interpolationSummary: selected.interpolationSummary }, null, 2)}</pre></details></div>
         </> : <>
           <div className="panel-title"><h1>Explore geography</h1><Compass size={21}/></div><p className="muted">Rivers and valleys, in their full context.</p>
           {error && <p className="error" role="alert">{error}</p>}
@@ -70,7 +73,7 @@ export function App() {
         </>}
         <div className="panel-footer"><span className="boundary-swatch"/>Victoria boundary<span>01 / AU</span></div>
       </aside>
-      <MapView feature={displayedFeature}/>
+      <MapView feature={displayedFeature} focus={showNetwork ? null : focusedEstimate}/>
     </main>
     <footer className="app-footer"><span>GeoXpl <span className="footer-divider">/</span> Geographic exploration</span><span className="footer-right"><span className="live-dot"/>Local workspace</span></footer>
   </div>;

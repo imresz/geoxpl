@@ -66,6 +66,17 @@ test('cycles stop with an explicit failure instead of looping', () => {
   const result = trace(item); assert.equal(result.status, 'partially_resolved'); assert.match(result.warnings.join(' '), /cycle/);
 });
 
+test('a directed coordinate gap preserves both recorded sections and gets a separate estimated connector', () => {
+  const item = fixture(); item.payload.features[1].geometry.coordinates[0] = [2.001,1];
+  const result = processGeometry({ query: 'Test River', type: 'river' }, [item], boundary).result;
+  assert.equal(result.status, 'partially_resolved');
+  assert.equal(result.geometry.type, 'MultiLineString');
+  assert.deepEqual(result.geometry.coordinates, [[[1,1],[2,1]],[[2.001,1],[4,1],[4.01,1]]]);
+  assert.equal(result.graph.components, 2);
+  assert.deepEqual(result.interpolations.features[0].geometry.coordinates, [[2,1],[2.001,1]]);
+  assert.equal(result.mainStem.selectedHydroIds.length, 3);
+});
+
 test('an unverified end node is not displayed or attributed as a network terminus', () => {
   const item = fixture(); item.metadata.geofabric.nodes[1].properties.ahgfftype = 4;
   assert.equal(trace(item).mouth, null);

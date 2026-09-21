@@ -1,14 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
-import type { Feature } from './api';
+import type { Feature, Interpolation } from './api';
 import { LocateFixed, Maximize, MapPin } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 const INITIAL: [number, number, number, number] = [137.5, -40.8, 151.2, -32.5];
 const FEATURE_PADDING = { top: 70, right: 60, bottom: 110, left: 55 };
-export function MapView({ feature }: { feature: Feature | null }) {
+const padding = (map: maplibregl.Map) => map.getContainer().clientHeight < 330 ? { top: 35, right: 45, bottom: 50, left: 45 } : FEATURE_PADDING;
+export function MapView({ feature, focus }: { feature: Feature | null; focus?: Interpolation | null }) {
   const element = useRef<HTMLDivElement>(null), map = useRef<maplibregl.Map | null>(null);
   const [loaded, setLoaded] = useState(false), [error, setError] = useState(''), [center, setCenter] = useState('37.10 S, 144.35 E');
+  const [showEstimates, setShowEstimates] = useState(true);
+  const bounds = feature?.displayBbox || feature?.bbox || INITIAL;
+  const estimates = feature?.interpolations?.features || [];
+  useEffect(() => { setShowEstimates(true); }, [feature?.id]);
   useEffect(() => {
     if (!element.current) return;
     let m: maplibregl.Map;
@@ -28,6 +33,9 @@ export function MapView({ feature }: { feature: Feature | null }) {
       m.addLayer({ id: 'valley-fill', type: 'fill', source: 'selected', filter: ['==', '$type', 'Polygon'], paint: { 'fill-color': '#188a75', 'fill-opacity': 0.18 } });
       m.addLayer({ id: 'feature-halo', type: 'line', source: 'selected', paint: { 'line-color': '#ffffff', 'line-width': 7, 'line-opacity': 0.9 } });
       m.addLayer({ id: 'feature-line', type: 'line', source: 'selected', paint: { 'line-color': '#126fcb', 'line-width': 3.5 } });
+      m.addSource('interpolated', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      m.addLayer({ id: 'interpolated-halo', type: 'line', source: 'interpolated', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 6, 'line-dasharray': [0.1, 1.6] } });
+      m.addLayer({ id: 'interpolated-line', type: 'line', source: 'interpolated', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#a33f71', 'line-width': 3, 'line-dasharray': [0.1, 3.2] } });
       m.addSource('endpoints', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
       m.addLayer({ id: 'endpoint-points', type: 'circle', source: 'endpoints', paint: { 'circle-radius': 6, 'circle-color': ['match', ['get', 'kind'], 'source', '#186454', '#b84e36'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 } });
       setLoaded(true);
@@ -39,23 +47,36 @@ export function MapView({ feature }: { feature: Feature | null }) {
   useEffect(() => {
     if (!loaded || !map.current) return;
     (map.current.getSource('selected') as maplibregl.GeoJSONSource).setData(feature ? { type: 'Feature', properties: {}, geometry: feature.geometry } : { type: 'FeatureCollection', features: [] });
+    (map.current.getSource('interpolated') as maplibregl.GeoJSONSource).setData(feature?.interpolations || { type: 'FeatureCollection', features: [] });
     (map.current.getSource('endpoints') as maplibregl.GeoJSONSource).setData({ type: 'FeatureCollection', features: (['source', 'mouth'] as const).flatMap(kind => feature?.[kind] ? [{ type: 'Feature' as const, properties: { kind }, geometry: { type: 'Point' as const, coordinates: feature[kind]!.coordinates } }] : []) });
-    if (feature) map.current.fitBounds(feature.bbox, { padding: FEATURE_PADDING, maxZoom: 13, duration: 900 });
+    if (feature) map.current.fitBounds(bounds, { padding: padding(map.current), maxZoom: 13, duration: 900 });
     const resize = new ResizeObserver(() => {
       map.current?.resize();
-      map.current?.fitBounds(feature?.bbox || INITIAL, { padding: feature ? FEATURE_PADDING : 35, maxZoom: 13, duration: 0 });
+      if (map.current) map.current.fitBounds(bounds, { padding: feature ? padding(map.current) : 35, maxZoom: 13, duration: 0 });
     });
     if (element.current) resize.observe(element.current);
     return () => resize.disconnect();
   }, [feature, loaded]);
+  useEffect(() => {
+    if (!loaded || !map.current) return;
+    for (const layer of ['interpolated-line', 'interpolated-halo']) map.current.setLayoutProperty(layer, 'visibility', showEstimates ? 'visible' : 'none');
+  }, [showEstimates, loaded]);
+  useEffect(() => {
+    if (!loaded || !map.current || !focus) return;
+    setShowEstimates(true);
+    const box = new maplibregl.LngLatBounds();
+    focus.geometry.coordinates.forEach(p => box.extend([p[0], p[1]]));
+    map.current.fitBounds(box, { padding: padding(map.current), maxZoom: 14, duration: 650 });
+  }, [focus, loaded]);
   return <section className="map-region" aria-label="Interactive geographical map">
     <div className="map-canvas" ref={element} />
-    <div className="map-location"><MapPin size={14}/><span>{feature ? feature.name : 'Southeastern Australia'}</span></div>
+    <div className="map-summary"><div className="map-location"><MapPin size={14}/><span>{feature ? feature.name : 'Southeastern Australia'}</span></div>
+    {feature && <section className="map-legend" aria-label="Map legend"><strong>Map legend</strong><span><i className="legend-recorded"/>Recorded geometry</span><label><input type="checkbox" aria-label="Show interpolated connections" checked={showEstimates} disabled={!estimates.length} onChange={e => setShowEstimates(e.target.checked)}/><i className="legend-interpolated"/>Interpolated (unverified)</label></section>}
+    {error && <div className="map-error" role="status">{error}<button aria-label="Dismiss map message" onClick={() => setError('')}>×</button></div>}</div>
     <div className="map-tools">
-      <button title="Fit selected feature" aria-label="Fit selected feature" onClick={() => map.current?.fitBounds(feature?.bbox || INITIAL, { padding: feature ? FEATURE_PADDING : 50 })}><Maximize size={18}/></button>
+      <button title="Fit selected feature" aria-label="Fit selected feature" onClick={() => { if (map.current) map.current.fitBounds(bounds, { padding: feature ? padding(map.current) : 50 }); }}><Maximize size={18}/></button>
       <button title="Return to Victoria" aria-label="Return to Victoria" onClick={() => map.current?.fitBounds(INITIAL, { padding: 40 })}><LocateFixed size={18}/></button>
     </div>
-    {error && <div className="map-error" role="status">{error}<button aria-label="Dismiss map message" onClick={() => setError('')}>×</button></div>}
     <span className="map-coordinates">{center}</span>
     {feature && <div className="overlay-attribution">{[...new Set(feature.evidence.map(e => e.attribution))].join(' · ')}</div>}
   </section>;

@@ -4,6 +4,7 @@ import { scryptSync, randomBytes, createHash, timingSafeEqual } from 'node:crypt
 import { z } from 'zod';
 import { sourceSchema, aiConfigured } from './research.js';
 import { normalize } from './store.js';
+import { estimatedConnectionsSchema } from './interpolation.js';
 
 export function createApp(store, config = {}) {
   const app = express(); app.disable('x-powered-by');
@@ -88,8 +89,10 @@ export function createApp(store, config = {}) {
   app.patch('/api/admin/jobs/:id/settings', (req, res) => {
     const job = store.getJob(req.params.id); if (!job) return res.status(404).json({ error: 'Job not found.' });
     if (['queued', 'importing', 'processing', 'researching'].includes(job.phase)) return res.status(409).json({ error: 'Wait for the active attempt to finish before changing feature settings.' });
-    const settings = z.object({ aliases: z.array(z.string().trim().min(2).max(150)).max(20), preferredSourceId: z.string().nullable() }).parse(req.body);
+    const settings = z.object({ aliases: z.array(z.string().trim().min(2).max(150)).max(20), preferredSourceId: z.string().nullable(), estimatedConnections: estimatedConnectionsSchema.optional() }).parse(req.body);
+    const previous = store.featureSettings(job.id);
     settings.aliases = [...new Set(settings.aliases.map(normalize))].filter(a => a !== job.normalized).sort();
+    if (settings.estimatedConnections === undefined && previous.estimatedConnections && previous.preferredSourceId === settings.preferredSourceId && JSON.stringify(previous.aliases) === JSON.stringify(settings.aliases)) settings.estimatedConnections = previous.estimatedConnections;
     if (settings.preferredSourceId && !store.sources().some(s => s.id === settings.preferredSourceId && s.type === job.type && s.status === 'approved')) return res.status(400).json({ error: 'Select an approved source of the same feature type.' });
     if (JSON.stringify(settings) === JSON.stringify(store.featureSettings(job.id))) return res.json({ ok: true, unchanged: true });
     store.setFeatureSettings(job.id, settings);
