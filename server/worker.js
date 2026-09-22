@@ -9,7 +9,7 @@ export function createWorker(store, options = {}) {
   store.db.prepare("UPDATE jobs SET phase='queued',message='Resuming interrupted processing' WHERE status='pending' AND phase IN ('importing','processing','researching')").run();
   async function run(job) {
     const settings = store.featureSettings(job.id);
-    const sources = store.sources().filter(s => s.status === 'approved' && s.type === job.type).sort((a, b) => a.id.localeCompare(b.id));
+    const sources = store.sources().filter(s => s.status === 'approved' && s.type === job.type && (s.format !== 'vic-gmu250' || settings.valleyFloor?.sourceId === s.id)).sort((a, b) => a.id.localeCompare(b.id));
     const forceResearch = store.setting(`research:${job.id}`) === 'true';
     if (forceResearch) store.setting(`research:${job.id}`, 'false');
     const imports = [], failures = [];
@@ -27,7 +27,7 @@ export function createWorker(store, options = {}) {
       return store.updateJob(job.id, 'pending', 'awaiting_review', 'A source changed during import. Review it and retry.');
     }
     store.updateJob(job.id, 'pending', 'processing', 'Assembling and validating geometry');
-    const output = processGeometry(job, imports, options.boundary || null, settings);
+    const output = processGeometry(job, imports, options.boundary || null, settings, { drainage: settings.valleyFloor && store.feature(settings.valleyFloor.drainageFeatureId) });
     const results = output.results || [];
     if (failures.length) for (const result of results) result.selection.importFailures = failures;
     let featureId;
@@ -41,6 +41,10 @@ export function createWorker(store, options = {}) {
       return store.updateJob(job.id, output.status, output.status === 'resolved' ? 'completed' : 'awaiting_data', `${output.message}${output.status === 'resolved' ? '' : ' Some extents remain partial; each result shows its own evidence and estimates.'}`);
     }
     if (output.status === 'resolved') return store.updateJob(job.id, 'resolved', 'completed', 'Feature ready', featureId);
+    if (output.result?.extentEstimate && !forceResearch) {
+      store.event(job.id, 'valley_floor_estimated', 'Reviewed landform polygons retained as a partial valley-floor estimate; no complete valley boundary inferred.');
+      return store.updateJob(job.id, output.status, 'available_estimate', 'Partial valley-floor estimate available. The dotted boundary is not a verified full valley extent.', featureId);
+    }
     if (output.result?.interpolations?.features.length && !forceResearch) {
       store.event(job.id, 'interpolated_connections', `${output.result.interpolations.features.length} estimated connections retained separately from recorded geometry.`);
       return store.updateJob(job.id, output.status, 'awaiting_data', 'Map available with dotted, interpolated connections. These are estimates; the full extent is not verified.', featureId);

@@ -5,6 +5,7 @@ import { mainStemCandidate } from './main-stem.js';
 import { isGeofabric, traceGeofabricMatches } from './geofabric.js';
 import { normalize } from './store.js';
 import { withInterpolations } from './interpolation.js';
+import { processValleyFloor } from './valley-floor.js';
 
 export const algorithmVersion = 'directed-geofabric/5.0.0';
 const scopeRegions = new WeakMap();
@@ -155,7 +156,8 @@ function processDirectedSource(item, result) {
   return { sourceId: source.id, sourceName: source.name, coverage: source.completeness, spanKm: distance(data.bbox.slice(0, 2), data.bbox.slice(2)), result: { ...data, lengthKm: length(feature(data.geometry)), areaKm2: null, principalDrainage: null, confidence: data.status === 'resolved' ? 'derived_published_network' : 'review_required', method: 'geofabric_directed_main_stem', algorithmVersion, evidence } };
 }
 
-function sourceMatches(job, item, boundary, settings) {
+function sourceMatches(job, item, boundary, settings, context) {
+  if (item.source.format === 'vic-gmu250') return job.type === 'valley' ? [processValleyFloor(item, boundary, settings, context.drainage)] : [];
   if (job.type === 'river' && isGeofabric(item.source)) {
     const traced = traceGeofabricMatches(item, boundary, [job.query, ...(settings.aliases || [])].filter(Boolean).map(normalize));
     return traced.error ? [{ sourceId: item.source.id, sourceName: item.source.name, error: traced.error }] : traced.results.map(result => ({ ...processDirectedSource(item, result), identityRank: 2 }));
@@ -197,8 +199,8 @@ function labelMatches(job, results, boundary) {
     ? { ...result, displayName: `${result.displayName} - ${result.locationDescription} [${result.identityKey.split(':').at(-1)}]` } : result);
 }
 
-export function processGeometry(job, imports, boundary, settings = {}) {
-  const candidates = imports.flatMap(item => sourceMatches(job, item, boundary, settings));
+export function processGeometry(job, imports, boundary, settings = {}, context = {}) {
+  const candidates = imports.flatMap(item => sourceMatches(job, item, boundary, settings, context));
   const comparisons = candidates.map(c => ({ sourceId: c.sourceId, sourceName: c.sourceName, identityKey: c.result?.identityKey, coverage: c.coverage, error: c.error, excludedRecords: c.excludedRecords ?? c.result?.identity.excludedRecords, records: c.result?.evidence.length, lengthKm: c.result?.lengthKm, bbox: c.result?.bbox, components: c.result?.graph?.components, branches: c.result?.graph?.branchJunctions }));
   const eligible = imports.map(item => {
     const matches = candidates.filter(c => c.sourceId === item.source.id && c.result);

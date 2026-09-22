@@ -32,16 +32,30 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
   }
   const getJob = id => db.prepare('SELECT * FROM jobs WHERE id=?').get(id);
   const event = (job, action, detail) => db.prepare('INSERT INTO events(job_id,action,detail,created) VALUES(?,?,?,?)').run(job, action, detail, now());
+  const invalidateDrainageDependents = ids => {
+    if (!ids.length) return;
+    const reason = 'Principal river geometry changed or was withdrawn. Retry to refresh the valley-floor estimate.';
+    for (const row of db.prepare('SELECT id,job_id,data FROM features WHERE active=1').all()) {
+      const data = JSON.parse(row.data);
+      if (!ids.includes(data.principalDrainage?.featureId)) continue;
+      data.status = 'partially_resolved'; data.warnings = [...new Set([...(data.warnings || []), reason])];
+      db.prepare('UPDATE features SET active=0,data=? WHERE id=?').run(JSON.stringify(data), row.id);
+      db.prepare("UPDATE jobs SET feature_id=NULL,status='insufficient_data',phase='awaiting_data',message=?,updated=? WHERE id=?").run(reason, now(), row.job_id);
+      event(row.job_id, 'drainage_changed', reason);
+    }
+  };
   return {
     db, getJob, event,
     featureSettings(id) { const r = db.prepare('SELECT data FROM feature_settings WHERE job_id=?').get(id); return r ? JSON.parse(r.data) : { aliases: [], preferredSourceId: null }; },
     setFeatureSettings(id, data) { db.prepare('INSERT INTO feature_settings VALUES(?,?) ON CONFLICT(job_id) DO UPDATE SET data=excluded.data').run(id, JSON.stringify(data)); event(id, 'identity_updated', 'Feature aliases and source selection updated'); },
     invalidateFeature(jobId, reason) {
-      for (const r of db.prepare('SELECT id,data FROM features WHERE job_id=? AND active=1').all(jobId)) {
+      const affected = db.prepare('SELECT id,data FROM features WHERE job_id=? AND active=1').all(jobId);
+      for (const r of affected) {
         const data = JSON.parse(r.data); data.status = 'partially_resolved'; data.warnings = [...new Set([...(data.warnings || []), reason])];
         db.prepare('UPDATE features SET data=?,active=0 WHERE id=?').run(JSON.stringify(data), r.id);
       }
       db.prepare('UPDATE jobs SET feature_id=NULL WHERE id=?').run(jobId);
+      invalidateDrainageDependents(affected.map(r => r.id));
     },
     setting(key, value) { if (value !== undefined) db.prepare('INSERT OR REPLACE INTO settings VALUES(?,?)').run(key, String(value)); return db.prepare('SELECT value FROM settings WHERE key=?').get(key)?.value; },
     request(query, type) {
@@ -88,6 +102,7 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
           return result;
         });
         db.prepare('UPDATE jobs SET feature_id=? WHERE id=?').run(saved.length === 1 ? saved[0].id : null, job.id);
+        if (job.type === 'river') invalidateDrainageDependents(previous.map(f => f.id));
         db.exec('COMMIT'); return saved;
       } catch (error) { db.exec('ROLLBACK'); throw error; }
     },

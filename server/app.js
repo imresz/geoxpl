@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { sourceSchema, aiConfigured } from './research.js';
 import { normalize } from './store.js';
 import { estimatedConnectionsSchema } from './interpolation.js';
+import { valleyFloorSchema, landformEndpoint } from './valley-floor.js';
 
 export function createApp(store, config = {}) {
   const app = express(); app.disable('x-powered-by');
@@ -24,7 +25,7 @@ export function createApp(store, config = {}) {
     return !!store.db.prepare('SELECT token FROM sessions WHERE token=? AND expires>?').get(createHash('sha256').update(token).digest('hex'), Date.now());
   };
   const requireAdmin = (req, res, next) => authenticated(req) ? next() : res.status(401).json({ error: 'Administrator sign-in required.' });
-  const summary = f => ({ id: f.id, name: f.name, displayName: f.displayName || f.name, locationLabel: f.locationLabel, locationDescription: f.locationDescription, type: f.type, status: f.status, lengthKm: f.lengthKm, areaKm2: f.areaKm2, bbox: f.displayBbox || f.bbox });
+  const summary = f => ({ id: f.id, name: f.name, displayName: f.displayName || f.name, locationLabel: f.locationLabel, locationDescription: f.locationDescription, type: f.type, status: f.status, lengthKm: f.lengthKm, areaKm2: f.areaKm2, extentEstimate: f.extentEstimate, bbox: f.displayBbox || f.bbox });
   const viewJob = job => {
     const matches = store.jobFeatures(job.id);
     return { id: job.id, query: job.query, type: job.type, status: job.status, phase: job.phase, message: job.message, created: job.created, updated: job.updated, selectionRequired: matches.length > 1, matches: matches.map(summary), feature: matches.length === 1 && job.feature_id ? store.feature(job.feature_id) : null };
@@ -67,12 +68,18 @@ export function createApp(store, config = {}) {
   app.post('/api/admin/logout', requireAdmin, (req, res) => { const token = tokenFrom(req); store.db.prepare('DELETE FROM sessions WHERE token=?').run(createHash('sha256').update(token).digest('hex')); res.clearCookie('geoxpl_session', { path: '/' }); res.json({ ok: true }); });
   app.use('/api/admin', requireAdmin);
   app.get('/api/admin/overview', (_req, res) => res.json({ jobs: store.jobs().map(j => ({ ...j, matches: store.jobFeatures(j.id).map(summary), settings: store.featureSettings(j.id) })), sources: store.sources(), reports: store.reports(), features: store.features().map(({ geometry, recordedNetwork, ...f }) => f), events: store.db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT 100').all(), searches: store.db.prepare('SELECT COUNT(*) AS count FROM searches').get().count, imports: store.db.prepare('SELECT id,source_id,job_id,created,checksum FROM imports ORDER BY created DESC LIMIT 100').all(), aiConfigured: aiConfigured(), aiHourlyLimit: Math.max(1, Math.min(30, Number(process.env.AI_REQUESTS_PER_HOUR) || 3)) }));
-  app.post('/api/admin/sources', (req, res) => res.status(201).json({ id: store.addSource(sourceSchema.parse(req.body)) }));
+  const validLandformSource = source => source.format !== 'vic-gmu250' || (source.type === 'valley' && source.url === landformEndpoint);
+  app.post('/api/admin/sources', (req, res) => {
+    const source = sourceSchema.parse(req.body);
+    if (!validLandformSource(source)) return res.status(400).json({ error: 'GMU250 requires feature type Valley and the official Victorian WFS endpoint.' });
+    res.status(201).json({ id: store.addSource(source) });
+  });
   app.patch('/api/admin/sources/:id', (req, res) => {
     const old = store.sources().find(s => s.id === req.params.id); if (!old) return res.status(404).json({ error: 'Source not found.' });
     const { status, ...body } = req.body;
     const newStatus = z.enum(['pending', 'approved', 'rejected']).parse(status);
     const source = sourceSchema.parse(body);
+    if (!validLandformSource(source)) return res.status(400).json({ error: 'GMU250 requires feature type Valley and the official Victorian WFS endpoint.' });
     if (newStatus === 'approved' && (!source.licence.trim() || !source.attribution.trim())) return res.status(400).json({ error: 'Verified licence and attribution are required for approval.' });
     if (newStatus === old.status && JSON.stringify(sourceSchema.parse(old)) === JSON.stringify(source)) return res.json({ ok: true, unchanged: true });
     store.decideSource(old.id, newStatus, source);
@@ -92,10 +99,17 @@ export function createApp(store, config = {}) {
   app.patch('/api/admin/jobs/:id/settings', (req, res) => {
     const job = store.getJob(req.params.id); if (!job) return res.status(404).json({ error: 'Job not found.' });
     if (['queued', 'importing', 'processing', 'researching'].includes(job.phase)) return res.status(409).json({ error: 'Wait for the active attempt to finish before changing feature settings.' });
-    const settings = z.object({ aliases: z.array(z.string().trim().min(2).max(150)).max(20), preferredSourceId: z.string().nullable(), estimatedConnections: estimatedConnectionsSchema.optional() }).parse(req.body);
+    const settings = z.object({ aliases: z.array(z.string().trim().min(2).max(150)).max(20), preferredSourceId: z.string().nullable(), estimatedConnections: estimatedConnectionsSchema.optional(), valleyFloor: valleyFloorSchema.nullable().optional() }).parse(req.body);
     const previous = store.featureSettings(job.id);
     settings.aliases = [...new Set(settings.aliases.map(normalize))].filter(a => a !== job.normalized).sort();
     if (settings.estimatedConnections === undefined && previous.estimatedConnections && previous.preferredSourceId === settings.preferredSourceId && JSON.stringify(previous.aliases) === JSON.stringify(settings.aliases)) settings.estimatedConnections = previous.estimatedConnections;
+    if (settings.valleyFloor === undefined && previous.valleyFloor && previous.preferredSourceId === settings.preferredSourceId && JSON.stringify(previous.aliases) === JSON.stringify(settings.aliases)) settings.valleyFloor = previous.valleyFloor;
+    if (settings.valleyFloor) {
+      const definition = settings.valleyFloor, drainage = store.feature(definition.drainageFeatureId);
+      if (job.type !== 'valley' || definition.sourceId !== settings.preferredSourceId || !store.sources().some(s => s.id === definition.sourceId && s.status === 'approved' && s.type === 'valley' && s.format === 'vic-gmu250')) return res.status(400).json({ error: 'Select an approved GMU250 geometry source for this valley-floor definition.' });
+      if (!drainage || drainage.type !== 'river' || drainage.status !== 'resolved') return res.status(400).json({ error: 'Select a current resolved river as the principal drainage.' });
+      definition.recordIds = [...new Set(definition.recordIds)].sort();
+    }
     if (settings.preferredSourceId && !store.sources().some(s => s.id === settings.preferredSourceId && s.type === job.type && s.status === 'approved')) return res.status(400).json({ error: 'Select an approved source of the same feature type.' });
     if (JSON.stringify(settings) === JSON.stringify(store.featureSettings(job.id))) return res.json({ ok: true, unchanged: true });
     store.setFeatureSettings(job.id, settings);
