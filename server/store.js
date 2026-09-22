@@ -22,6 +22,14 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
     CREATE TABLE IF NOT EXISTS ai_calls(id INTEGER PRIMARY KEY, created INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS feature_settings(job_id TEXT PRIMARY KEY REFERENCES jobs(id), data TEXT NOT NULL);
   `);
+  if (!db.prepare('PRAGMA table_info(features)').all().some(column => column.name === 'identity_key')) {
+    db.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE features_many(id TEXT PRIMARY KEY, job_id TEXT NOT NULL, identity_key TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, data TEXT NOT NULL, created TEXT NOT NULL, UNIQUE(job_id,identity_key));
+      INSERT INTO features_many(id,job_id,identity_key,data,created) SELECT id,job_id,'single',data,created FROM features;
+      DROP TABLE features;
+      ALTER TABLE features_many RENAME TO features;
+      COMMIT;`);
+  }
   const getJob = id => db.prepare('SELECT * FROM jobs WHERE id=?').get(id);
   const event = (job, action, detail) => db.prepare('INSERT INTO events(job_id,action,detail,created) VALUES(?,?,?,?)').run(job, action, detail, now());
   return {
@@ -29,10 +37,10 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
     featureSettings(id) { const r = db.prepare('SELECT data FROM feature_settings WHERE job_id=?').get(id); return r ? JSON.parse(r.data) : { aliases: [], preferredSourceId: null }; },
     setFeatureSettings(id, data) { db.prepare('INSERT INTO feature_settings VALUES(?,?) ON CONFLICT(job_id) DO UPDATE SET data=excluded.data').run(id, JSON.stringify(data)); event(id, 'identity_updated', 'Feature aliases and source selection updated'); },
     invalidateFeature(jobId, reason) {
-      const r = db.prepare('SELECT id,data FROM features WHERE job_id=?').get(jobId);
-      if (!r) return;
-      const data = JSON.parse(r.data); data.status = 'partially_resolved'; data.warnings = [...new Set([...data.warnings, reason])];
-      db.prepare('UPDATE features SET data=? WHERE id=?').run(JSON.stringify(data), r.id);
+      for (const r of db.prepare('SELECT id,data FROM features WHERE job_id=? AND active=1').all(jobId)) {
+        const data = JSON.parse(r.data); data.status = 'partially_resolved'; data.warnings = [...new Set([...(data.warnings || []), reason])];
+        db.prepare('UPDATE features SET data=?,active=0 WHERE id=?').run(JSON.stringify(data), r.id);
+      }
       db.prepare('UPDATE jobs SET feature_id=NULL WHERE id=?').run(jobId);
     },
     setting(key, value) { if (value !== undefined) db.prepare('INSERT OR REPLACE INTO settings VALUES(?,?)').run(key, String(value)); return db.prepare('SELECT value FROM settings WHERE key=?').get(key)?.value; },
@@ -62,16 +70,30 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
       if (existing) { event(jobId, 'snapshot_reused', 'Unchanged import snapshot retained'); return existing.id; }
       const id = randomUUID(); db.prepare('INSERT INTO imports VALUES(?,?,?,?,?,?,?)').run(id, sourceId, jobId, now(), checksum, JSON.stringify(payload), JSON.stringify(metadata)); return id;
     },
-    saveFeature(job, data) {
-      const existing = db.prepare('SELECT id FROM features WHERE job_id=?').get(job.id);
-      const id = existing?.id || randomUUID();
-      const result = { ...data, id, name: job.query, type: job.type, aliases: this.featureSettings(job.id).aliases, created: now() };
-      db.prepare('INSERT INTO derivations VALUES(?,?,?,?)').run(randomUUID(), id, JSON.stringify(result), now());
-      db.prepare('INSERT INTO features VALUES(?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET data=excluded.data').run(id, job.id, JSON.stringify(result), now());
-      return result;
+    saveFeature(job, data) { return this.saveFeatures(job, [data])[0]; },
+    saveFeatures(job, data) {
+      const keys = data.map(f => f.identityKey || 'single');
+      if (new Set(keys).size !== keys.length) throw Error('Matching features require distinct stable identity keys.');
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const previous = db.prepare('SELECT id,identity_key FROM features WHERE job_id=?').all(job.id);
+        db.prepare('UPDATE features SET active=0 WHERE job_id=?').run(job.id);
+        const saved = data.map((value, index) => {
+          const key = keys[index];
+          const existing = previous.find(f => f.identity_key === key) || (data.length === 1 && previous.length === 1 && previous[0].identity_key === 'single' ? previous[0] : null);
+          const id = existing?.id || randomUUID();
+          const result = { ...value, identityKey: key, id, name: job.query, displayName: value.displayName || job.query, type: job.type, aliases: this.featureSettings(job.id).aliases, created: now() };
+          db.prepare('INSERT INTO derivations VALUES(?,?,?,?)').run(randomUUID(), id, JSON.stringify(result), now());
+          db.prepare('INSERT INTO features(id,job_id,identity_key,active,data,created) VALUES(?,?,?,1,?,?) ON CONFLICT(id) DO UPDATE SET identity_key=excluded.identity_key,active=1,data=excluded.data').run(id, job.id, key, JSON.stringify(result), now());
+          return result;
+        });
+        db.prepare('UPDATE jobs SET feature_id=? WHERE id=?').run(saved.length === 1 ? saved[0].id : null, job.id);
+        db.exec('COMMIT'); return saved;
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
     },
-    feature(id) { const r = db.prepare('SELECT data FROM features WHERE id=?').get(id); return r ? JSON.parse(r.data) : null; },
-    features() { return db.prepare('SELECT data FROM features ORDER BY created DESC').all().map(r => JSON.parse(r.data)); },
+    feature(id) { const r = db.prepare('SELECT data FROM features WHERE id=? AND active=1').get(id); return r ? JSON.parse(r.data) : null; },
+    jobFeatures(id) { return db.prepare('SELECT data FROM features WHERE job_id=? AND active=1 ORDER BY identity_key').all(id).map(r => JSON.parse(r.data)); },
+    features() { return db.prepare('SELECT data FROM features WHERE active=1 ORDER BY created DESC').all().map(r => JSON.parse(r.data)); },
     report(jobId, data) { const id = randomUUID(); db.prepare('INSERT INTO reports VALUES(?,?,?,?,?)').run(id, jobId, JSON.stringify(data), 'pending', now()); return id; },
     reports() { return db.prepare('SELECT * FROM reports ORDER BY created DESC').all().map(r => ({ ...r, data: JSON.parse(r.data) })); },
     close() { db.close(); }

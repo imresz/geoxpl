@@ -28,10 +28,18 @@ export function createWorker(store, options = {}) {
     }
     store.updateJob(job.id, 'pending', 'processing', 'Assembling and validating geometry');
     const output = processGeometry(job, imports, options.boundary || null, settings);
-    if (failures.length && output.result) output.result.selection.importFailures = failures;
+    const results = output.results || [];
+    if (failures.length) for (const result of results) result.selection.importFailures = failures;
     let featureId;
-    if (output.result) featureId = store.saveFeature(job, output.result).id;
+    if (results.length) {
+      const saved = store.saveFeatures(job, results);
+      if (saved.length === 1) featureId = saved[0].id;
+    }
     else store.invalidateFeature(job.id, 'No current usable geometry. Review identity and source selection.');
+    if (results.length > 1 && (!forceResearch || output.status === 'resolved')) {
+      store.event(job.id, 'matching_features_processed', `${results.length} distinct identities stored separately; selection is left to the user.`);
+      return store.updateJob(job.id, output.status, output.status === 'resolved' ? 'completed' : 'awaiting_data', `${output.message}${output.status === 'resolved' ? '' : ' Some extents remain partial; each result shows its own evidence and estimates.'}`);
+    }
     if (output.status === 'resolved') return store.updateJob(job.id, 'resolved', 'completed', 'Feature ready', featureId);
     if (output.result?.interpolations?.features.length && !forceResearch) {
       store.event(job.id, 'interpolated_connections', `${output.result.interpolations.features.length} estimated connections retained separately from recorded geometry.`);
@@ -42,14 +50,14 @@ export function createWorker(store, options = {}) {
       store.event(job.id, 'main_stem_processed', candidate ? `Candidate: ${output.result.lengthKm.toFixed(1)} km; ${output.result.mainStem.componentRoutes.length} separate component routes. Not verified.` : output.result.mainStem.reason);
       return store.updateJob(job.id, output.status, 'awaiting_data', output.result.method === 'geofabric_directed_main_stem' ? output.result.warnings.join(' ') : candidate ? 'Main-stem candidate prepared. Verified branch choices, endpoints and any missing connections are still needed.' : output.result.mainStem.reason, featureId);
     }
-    const diagnostics = { settings, status: output.status, warnings: output.result?.warnings || [], identity: output.result?.identity, mainStem: output.result?.mainStem, selectedSourceId: output.result?.selection.sourceId, comparisons: output.comparisons, importFailures: failures };
-    const relevant = output.result ? sources.filter(s => s.id === output.result.selection.sourceId) : sources;
+    const diagnostics = { settings, status: output.status, warnings: results.flatMap(r => r.warnings), matches: results.map(r => ({ identityKey: r.identityKey, displayName: r.displayName, status: r.status, warnings: r.warnings, mainStem: r.mainStem })), identity: output.result?.identity, mainStem: output.result?.mainStem, selectedSourceId: results[0]?.selection.sourceId, comparisons: output.comparisons, importFailures: failures };
+    const relevant = results.length ? sources.filter(s => s.id === results[0].selection.sourceId) : sources;
     const relevantIds = new Set(relevant.map(s => s.id));
     const fingerprint = createHash('sha256').update(JSON.stringify({
       query: job.normalized || job.query, type: job.type, settings, algorithmVersion,
       sources: relevant.map(s => ({ id: s.id, url: s.url, nameField: s.nameField, idField: s.idField, completeness: s.completeness, version: s.version, licence: s.licence, attribution: s.attribution })),
       imports: imports.filter(i => relevantIds.has(i.source.id)).map(i => ({ sourceId: i.source.id, checksum: i.checksum, truncated: i.truncated })),
-      evidence: { status: output.status, warnings: diagnostics.warnings, identity: diagnostics.identity, mainStem: diagnostics.mainStem, selectedSourceId: diagnostics.selectedSourceId },
+      evidence: { status: output.status, warnings: diagnostics.warnings, matches: diagnostics.matches, identity: diagnostics.identity, mainStem: diagnostics.mainStem, selectedSourceId: diagnostics.selectedSourceId },
       ai: aiConfigured(), model: process.env.OPENAI_MODEL || ''
     })).digest('hex');
     const cached = !forceResearch && store.reports().find(r => r.job_id === job.id && r.data.fingerprint === fingerprint && !['system', 'rate limit'].includes(r.data.provider));
@@ -73,7 +81,7 @@ export function createWorker(store, options = {}) {
       store.updateJob(job.id, output.status, 'awaiting_review', 'Processing needs administrator review. Please try again later.', featureId);
     } catch (e) {
       store.report(job.id, { provider: 'system', summary: e.message, nextSteps: ['Check AI configuration or register a suitable source, then retry.'], evidence: [], candidates: [] });
-      store.updateJob(job.id, output.result ? 'partially_resolved' : 'missing_capability', 'awaiting_review', 'Research could not finish. An administrator can review the request.', featureId);
+      store.updateJob(job.id, results.length ? 'partially_resolved' : 'missing_capability', 'awaiting_review', 'Research could not finish. An administrator can review the request.', featureId);
     }
   }
   async function tick() {

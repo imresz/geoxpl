@@ -24,7 +24,11 @@ export function createApp(store, config = {}) {
     return !!store.db.prepare('SELECT token FROM sessions WHERE token=? AND expires>?').get(createHash('sha256').update(token).digest('hex'), Date.now());
   };
   const requireAdmin = (req, res, next) => authenticated(req) ? next() : res.status(401).json({ error: 'Administrator sign-in required.' });
-  const viewJob = job => ({ id: job.id, query: job.query, type: job.type, status: job.status, phase: job.phase, message: job.message, created: job.created, updated: job.updated, feature: job.feature_id ? store.feature(job.feature_id) : null });
+  const summary = f => ({ id: f.id, name: f.name, displayName: f.displayName || f.name, locationLabel: f.locationLabel, locationDescription: f.locationDescription, type: f.type, status: f.status, lengthKm: f.lengthKm, areaKm2: f.areaKm2, bbox: f.displayBbox || f.bbox });
+  const viewJob = job => {
+    const matches = store.jobFeatures(job.id);
+    return { id: job.id, query: job.query, type: job.type, status: job.status, phase: job.phase, message: job.message, created: job.created, updated: job.updated, selectionRequired: matches.length > 1, matches: matches.map(summary), feature: matches.length === 1 && job.feature_id ? store.feature(job.feature_id) : null };
+  };
   const session = res => {
     const token = randomBytes(32).toString('hex');
     store.db.prepare('DELETE FROM sessions WHERE expires<?').run(Date.now());
@@ -33,7 +37,7 @@ export function createApp(store, config = {}) {
   };
   app.get('/api/config', (_req, res) => res.json({ name: 'GeoXpl', interactiveWaitMs: 5000, types: ['river', 'valley'] }));
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
-  app.get('/api/catalogue', (_req, res) => res.json(store.features().filter(f => f.status === 'resolved').map(({ geometry, ...f }) => f)));
+  app.get('/api/catalogue', (_req, res) => res.json(store.features().filter(f => f.status === 'resolved').map(summary)));
   app.post('/api/search', rateLimit({ windowMs: 60000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many searches. Please wait a minute.' } }), (req, res) => {
     const input = z.object({ query: z.string().trim().min(2).max(150), type: z.enum(['river', 'valley']) }).parse(req.body);
     const count = store.db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE status='pending' AND phase='queued'").get().n;
@@ -62,7 +66,7 @@ export function createApp(store, config = {}) {
   });
   app.post('/api/admin/logout', requireAdmin, (req, res) => { const token = tokenFrom(req); store.db.prepare('DELETE FROM sessions WHERE token=?').run(createHash('sha256').update(token).digest('hex')); res.clearCookie('geoxpl_session', { path: '/' }); res.json({ ok: true }); });
   app.use('/api/admin', requireAdmin);
-  app.get('/api/admin/overview', (_req, res) => res.json({ jobs: store.jobs().map(j => ({ ...j, settings: store.featureSettings(j.id) })), sources: store.sources(), reports: store.reports(), features: store.features().map(({ geometry, recordedNetwork, ...f }) => f), events: store.db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT 100').all(), searches: store.db.prepare('SELECT COUNT(*) AS count FROM searches').get().count, imports: store.db.prepare('SELECT id,source_id,job_id,created,checksum FROM imports ORDER BY created DESC LIMIT 100').all(), aiConfigured: aiConfigured(), aiHourlyLimit: Math.max(1, Math.min(30, Number(process.env.AI_REQUESTS_PER_HOUR) || 3)) }));
+  app.get('/api/admin/overview', (_req, res) => res.json({ jobs: store.jobs().map(j => ({ ...j, matches: store.jobFeatures(j.id).map(summary), settings: store.featureSettings(j.id) })), sources: store.sources(), reports: store.reports(), features: store.features().map(({ geometry, recordedNetwork, ...f }) => f), events: store.db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT 100').all(), searches: store.db.prepare('SELECT COUNT(*) AS count FROM searches').get().count, imports: store.db.prepare('SELECT id,source_id,job_id,created,checksum FROM imports ORDER BY created DESC LIMIT 100').all(), aiConfigured: aiConfigured(), aiHourlyLimit: Math.max(1, Math.min(30, Number(process.env.AI_REQUESTS_PER_HOUR) || 3)) }));
   app.post('/api/admin/sources', (req, res) => res.status(201).json({ id: store.addSource(sourceSchema.parse(req.body)) }));
   app.patch('/api/admin/sources/:id', (req, res) => {
     const old = store.sources().find(s => s.id === req.params.id); if (!old) return res.status(404).json({ error: 'Source not found.' });
@@ -73,9 +77,8 @@ export function createApp(store, config = {}) {
     if (newStatus === old.status && JSON.stringify(sourceSchema.parse(old)) === JSON.stringify(source)) return res.json({ ok: true, unchanged: true });
     store.decideSource(old.id, newStatus, source);
     for (const f of store.features().filter(f => f.evidence.some(e => e.sourceId === old.id))) {
-      f.status = 'partially_resolved'; f.warnings = [...f.warnings, 'Source configuration or approval changed. Reprocessing required.'];
-      store.db.prepare('UPDATE features SET data=? WHERE id=?').run(JSON.stringify(f), f.id);
       const j = store.db.prepare('SELECT job_id FROM features WHERE id=?').get(f.id);
+      store.invalidateFeature(j.job_id, 'Source configuration or approval changed. Reprocessing required.');
       store.updateJob(j.job_id, 'pending', 'awaiting_review', 'Source approval changed; awaiting reprocessing');
     }
     if (newStatus === 'approved') for (const j of store.jobs().filter(j => j.type === source.type && !['importing', 'processing', 'researching', 'queued'].includes(j.phase))) store.retry(j.id);

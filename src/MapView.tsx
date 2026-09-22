@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
-import type { Feature, Interpolation } from './api';
+import { featureLabel, type Feature, type Interpolation } from './api';
 import { LocateFixed, Maximize, MapPin } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -70,7 +70,7 @@ export function MapView({ feature, focus }: { feature: Feature | null; focus?: I
   }, [focus, loaded]);
   return <section className="map-region" aria-label="Interactive geographical map">
     <div className="map-canvas" ref={element} />
-    <div className="map-summary"><div className="map-location"><MapPin size={14}/><span>{feature ? feature.name : 'Southeastern Australia'}</span></div>
+    <div className="map-summary"><div className="map-location"><MapPin size={14}/><span>{feature ? featureLabel(feature) : 'Southeastern Australia'}</span></div>
     {feature && <section className="map-legend" aria-label="Map legend"><strong>Map legend</strong><span><i className="legend-recorded"/>Recorded geometry</span><label><input type="checkbox" aria-label="Show interpolated connections" checked={showEstimates} disabled={!estimates.length} onChange={e => setShowEstimates(e.target.checked)}/><i className="legend-interpolated"/>Interpolated (unverified)</label></section>}
     {error && <div className="map-error" role="status">{error}<button aria-label="Dismiss map message" onClick={() => setError('')}>×</button></div>}</div>
     <div className="map-tools">

@@ -87,6 +87,8 @@ test('an unverified end node is not displayed or attributed as a network terminu
 test('a long downstream continuation through another river does not become the named feature', () => {
   const item = fixture(); item.payload.features[3].geometry.coordinates[1] = [8,1]; item.metadata.geofabric.nodes[1].geometry.coordinates = [8,1];
   const result = trace(item); assert.equal(result.status, 'partially_resolved'); assert.match(result.warnings.join(' '), /tributary mouth/);
+  assert.deepEqual(result.records.map(r => r.properties.hydroid), [11,12]);
+  assert.equal(result.mouth, null); assert.deepEqual(result.mainStem.excludedDownstreamHydroIds, [14]);
 });
 
 test('remote namesakes and unclassified starting points do not supply an in-scope source', () => {
