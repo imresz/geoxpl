@@ -4,3 +4,5 @@ runtime
 .git
 .env
 test-results
+.venv-terrain
+__pycache__

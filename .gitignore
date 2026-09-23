@@ -4,3 +4,5 @@ runtime/
 .env
 test-results/
 *.log
+.venv-terrain/
+__pycache__/

@@ -10,7 +10,7 @@ GeoXpl opens on a map of southeastern Australia. Enter a feature name, select **
 - Persistent feature catalogue, jobs, research reports, source registry, usage counts and audit events in SQLite.
 - Password-protected administration at `/admin`, with source and research approval/rejection, editable source settings, job retry and processing activity.
 - Named-feature import from approved ArcGIS layers and HTTPS GeoJSON collections. Raw import snapshots, checksums, source IDs and derivation history are retained.
-- Per-feature approved aliases and source selection; conservative river identity, connectivity and branch checks; published valley polygon import and reviewed [partial valley-floor estimates](#partial-valley-floor-estimates).
+- Per-feature approved aliases and source selection; conservative river identity, connectivity and branch checks; published valley polygon import and reviewed [partial valley-floor estimates](#partial-valley-floor-estimates), with optional [terrain-derived slope extensions](#terrain-derived-valley-extents).
 - BoM Geofabric directed river routes, with published headwater/terminal nodes, flow decisions and source-record provenance.
 - Same-named feature selection: separate geometry, location labels and stable saved IDs for each evidenced identity.
 - Optional OpenAI web research producing structured recommendations and candidate sources. AI calls are rate limited. New sources require separate approval.
@@ -22,7 +22,7 @@ This is a local pilot, not yet a general geographic inference engine. It keeps r
 
 Each source is processed independently. River components must intersect Victoria or its 2 km border tolerance; connected reaches are retained beyond the border, not clipped. For generic named networks, additional components within 100 metres of selected endpoints can be associated as possible continuations; recorded gaps remain unchanged even when a separate dotted estimate is displayed. The Geofabric adapter follows published node connectivity; mismatched endpoint coordinates now produce separate recorded sections and an interpolation candidate, never resolved geometry. Remote disconnected namesakes are excluded. Identity decisions and excluded-record counts are retained in the feature's processing evidence. Geographic eligibility alone is not proof of river identity or completeness.
 
-Only one dataset supplies a search's displayed geometries and measurements. For a single identity, automatic selection prefers a resolved candidate, then the candidate with the widest geographic span. Same-name selection has the identity-evidence priority described below. Administration can override the dataset per search. Other sources remain comparisons; overlapping national and regional representations are never added together. A failed comparison download does not invalidate a complete result from a different selected source. A failed explicitly selected source does not silently fall back to another dataset.
+For recorded features, only one dataset supplies a search's displayed geometries and measurements. Terrain-derived valleys instead combine a reviewed landform floor with a separately approved elevation raster, retaining both sources in provenance. For a single identity, automatic selection prefers a resolved candidate, then the candidate with the widest geographic span. Same-name selection has the identity-evidence priority described below. Administration can override the dataset per search. Other sources remain comparisons; overlapping national and regional representations are never added together. A failed comparison download does not invalidate a complete result from a different selected source. A failed explicitly selected source does not silently fall back to another dataset.
 
 ### Same-named features
 
@@ -145,7 +145,35 @@ The first landform adapter uses [Victoria's GMU250 geomorphology dataset](https:
 
 The adapter requests only those IDs in WGS84, checks that every requested record was returned exactly once, and saves the raw response geometry, request URL and checksum. The initial supported classification is GMU `1.3.3` (terraces, fans and floodplains), pattern `TER`, element `TEP`. Other classes require an explicit processor rule, not a change to the source's completeness label. Polygon components must intersect the approved principal river and Victoria. Turf unions the retained polygons, preserves holes, and computes their combined area. No river buffer, rectangular extent, or invented connecting polygon becomes the valley boundary. Limits are 32 reviewed records, 128 retained polygon components, 500,000 input vertices and the existing 20 MB response limit.
 
-The association itself is an interpretation: mapped polygons may extend along tributaries and omit valley sides or gaps. Generalised regional mapping is not suitable for property-level boundaries. Provenance includes the landform records and supporting river evidence. Reprocessing or withdrawing the principal river invalidates the dependent estimate, preserving its audit history; retry with a current resolved river to refresh it. Source changes also invalidate dependent results. No schema migration, extra service or new dependency is required. DEM-based ridge-to-ridge valley derivation remains unimplemented.
+The association itself is an interpretation: mapped polygons may extend along tributaries and omit valley sides or gaps. Generalised regional mapping is not suitable for property-level boundaries. Provenance includes the landform records and supporting river evidence. Reprocessing or withdrawing the principal river invalidates the dependent estimate, preserving its audit history; retry with a current resolved river to refresh it. Source changes also invalidate dependent results. The floor-only path needs no extra service. Optional terrain processing below adds a Python environment, but still cannot certify a complete named valley.
+
+### Terrain-derived valley extents
+
+An administrator can extend a reviewed floor onto adjoining slopes using the **Geoscience Australia elevation** source format. The public map then offers **Terrain extent / Valley floor**, with separate areas and a dotted, hideable boundary. Both views remain estimates, always partial. No mountain catalogue or AI-generated geometry is involved. This does not automatically enable terrain processing for all valley searches.
+
+Install **Python 3.11 or 3.12** and the pinned dependencies once, from the repository root:
+
+```powershell
+py -3.12 -m venv .venv-terrain
+.venv-terrain\Scripts\python.exe -m pip install -r terrain/requirements.txt
+.venv-terrain\Scripts\python.exe -m unittest discover -s terrain -p "test_*.py"
+```
+
+On Ubuntu, install `python3-venv`, then use `python3 -m venv .venv-terrain` and `.venv-terrain/bin/python` for the two Python commands. Docker installs this environment during its image build. The optional `TERRAIN_PYTHON` environment variable must name an absolute Python executable path when using a different environment. No shell command or user-supplied Python code is executed. Restart GeoXpl after setup.
+
+Register and approve the source with its verified licence and attribution, then select it under **Feature settings > Terrain elevation source** for a valley with a reviewed floor. The supported endpoint is:
+
+`https://services.ga.gov.au/gis/services/DEM_SRTM_1Second_2024/MapServer/WCSServer`
+
+The format fills in the type, endpoint and placeholder coverage fields. Set coverage to Partial. Dataset documentation and attribution are in the [Geoscience Australia SRTM DEM specification](https://knowledge.dea.ga.gov.au/data/external-data/ga-srtm-1-second-dem/). The licence is CC BY 4.0. The service edition is 2024, but the underlying SRTM measurements date from February 2000.
+
+**Method:** WCS coverage 1 supplies actual heights, not a coloured basemap. A 12 km padded extract around the reviewed floor is sampled at 3 arcseconds (native source: 1 arcsecond) and reprojected to an Australian Albers 90 m grid. Rasterio handles reprojection. SciPy smooths the heights and computes relative elevation against a regional mean. Scikit-image's marker-controlled watershed grows the floor's label across that relative-elevation surface, competing with other terrain lows. Shapely unions and simplifies raster polygons while retaining the original floor. This is terrain segmentation, not hydrologic catchment delineation or a claim that every boundary point follows a surveyed ridgeline.
+
+The administrator's terrain scale defaults to 1,000 m and is bounded to 750-2,000 m. The processor also runs at 75% and 125% of that scale and records the area range and spatial agreement. Agreement is a sensitivity diagnostic, **not a probability of correctness**. Subtle divides, urban terrain, vegetation effects and the chosen floor association can affect the outline. Named upstream/downstream limits are not inferred. No arbitrary expansion is used when terrain evidence fails.
+
+**Safety and provenance:** raw GeoTIFFs are retained under `runtime/terrain`, with checksums, request bounds, source/import IDs, library versions, grid resolution and parameters in the processing evidence. Only the fixed official HTTPS endpoint is supported. Missing heights, wrong georeferencing, extract-edge contact, invalid geometry and excessive expansion fail closed. Extracts are capped at 1.2 million input cells and 32 MB; processing has a five-minute timeout. A failed terrain attempt leaves a usable floor-only estimate with its reason, without automatically asking for another AI review. Source approval, settings and principal-river evidence are rechecked after processing. Retries re-fetch and recompute the extract; keep the raster files with database backups.
+
+This first implementation is experimental and not calibrated against an authoritative valley boundary. It is not suitable for flood risk, cadastral boundaries or planning decisions. Python tests use synthetic terrain; the Yarra pilot has additionally been checked with the official elevation service. Other valleys still need a reviewed floor association.
 
 ## Ubuntu deployment with Docker Compose
 
@@ -202,6 +230,7 @@ After updating code, run `npm ci`, `npm test` and `npm run build`, then restart 
 ```text
 src/           React map, search and administration
 server/        API, SQLite store, worker, importers, processors, AI research
+terrain/       Pinned Python terrain processor and synthetic terrain tests
 scripts/       Administrator password and reproducible boundary download
 tests/         Job, approval, import, security and geographic regression checks
 public/        Open-licensed Victoria outline and its provenance
@@ -210,4 +239,4 @@ deploy/        Example Ubuntu systemd service
 
 `npm test` runs offline regression tests with explicitly synthetic test geometry. `npm run build` type-checks the frontend and builds static assets. `GET /api/health` reports service readiness. `npm run boundary:download` refreshes the map outline from geoBoundaries and rewrites its provenance manifest; review changes before committing.
 
-The implementation uses Node/React/SQLite to keep the first pilot deployable as one process. PostGIS, distributed queues, terrain processing and automated source-update sweeps are not required to run this version and have not been added. This README describes the implementation; the dated requirement remains the product specification.
+The implementation uses Node/React/SQLite to keep the first pilot deployable as one process. PostGIS, distributed queues and automated source-update sweeps have not been added. Terrain processing is an optional local Python subprocess; floor-only and river processing do not require Python. This README describes the implementation; the dated requirement remains the product specification.
