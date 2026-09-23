@@ -7,6 +7,7 @@ GeoXpl opens on a map of southeastern Australia. Enter a feature name, select **
 ## What works
 
 - MapLibre map, OpenStreetMap basemap, Victoria outline, pan/zoom, feature fit and provenance panel.
+- Optional Victorian contour overlay, independent of feature processing, with elevation labels and remembered visibility.
 - Persistent feature catalogue, jobs, research reports, source registry, usage counts and audit events in SQLite.
 - Password-protected administration at `/admin`, with source and research approval/rejection, editable source settings, job retry and processing activity.
 - Named-feature import from approved ArcGIS layers and HTTPS GeoJSON collections. Raw import snapshots, checksums, source IDs and derivation history are retained.
@@ -51,6 +52,16 @@ For recorded features, the shared gap-overlay output is a GeoJSON `interpolation
 The simplified Victoria outline is from geoBoundaries, CC BY 4.0; exact metadata is in `public/boundary-source.json`. Its scope checks are suitable for this pilot, not cadastral or border-sensitive decisions. The catalogue and source registry initially contain no approved feature data. A source catalogue URL in the researcher is a discovery hint only.
 
 ## Local deployment (Windows, macOS or Linux)
+
+### Contour overlay
+
+The map legend has a **Contours (Victoria)** checkbox, available before or after a feature search. It defaults off and remembers its setting in browser local storage when permitted. The overlay sits above the OpenStreetMap basemap but below feature highlights. It changes no stored geometry, measurements or processing jobs, and needs no API key or Python setup.
+
+Contours come from the official [Vicmap Elevation 10-20 Contours & Relief](https://discover.data.vic.gov.au/dataset/vicmap-elevation-10-20-contours-relief) WMS layer `open-data-platform:el_contour`, licensed CC BY 4.0, attributed to the State of Victoria (Department of Transport and Planning). Coverage is Victorian, not Australia-wide. Elevations are in metres. These mapped contours are independent of the SRTM terrain-valley estimate and are not a flood-risk or cadastral product.
+
+`src/contours.ts` defines transparent, browser-fetched EPSG:3857 tiles from `https://opendata.maps.vic.gov.au/geoserver/wms`. The overlay starts at map zoom 7 and is bounded to the dataset extent. A numeric SLD filter avoids the provider's currently broken default string filter on altitude. It renders 500 m contours at broad scales, 100 m contours at intermediate scales, and all available 10-20 m source contours at detailed scales, with stronger labelled 100 m index contours. It does not interpolate missing contours. A coverage/scale status and an independent retry control handle unavailable tiles without interrupting the basemap or feature search. Internet access to the Victorian service is required; availability and data currency remain provider-dependent.
+
+### Starting locally
 
 Requires **Node.js 24 LTS** and npm. Run from the repository root:
 

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import { featureLabel, type Feature, type Interpolation } from './api';
-import { LocateFixed, Maximize, MapPin } from 'lucide-react';
+import { LocateFixed, Maximize, MapPin, RefreshCw } from 'lucide-react';
+import { CONTOUR_SOURCE, CONTOUR_PREFERENCE, contourSource, contourLayer, contourCoverage } from './contours';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 const INITIAL: [number, number, number, number] = [137.5, -40.8, 151.2, -32.5];
@@ -11,6 +12,9 @@ export function MapView({ feature, focus }: { feature: Feature | null; focus?: I
   const element = useRef<HTMLDivElement>(null), map = useRef<maplibregl.Map | null>(null);
   const [loaded, setLoaded] = useState(false), [error, setError] = useState(''), [center, setCenter] = useState('37.10 S, 144.35 E');
   const [showEstimates, setShowEstimates] = useState(true);
+  const [showContours, setShowContours] = useState(() => { try { return localStorage.getItem(CONTOUR_PREFERENCE) === 'true'; } catch { return false; } });
+  const [contourLoading, setContourLoading] = useState(false), [contourError, setContourError] = useState(false), [contourAttempt, setContourAttempt] = useState(0);
+  const [contourAvailability, setContourAvailability] = useState<string | null>('Contours hidden at overview scale');
   const bounds = feature?.displayBbox || feature?.bbox || INITIAL;
   const estimates = feature?.interpolations?.features || [];
   const attribution = [...new Set(feature?.evidence.map(e => e.attribution).filter(Boolean) || [])].join(' · ');
@@ -26,7 +30,7 @@ export function MapView({ feature, focus }: { feature: Feature | null; focus?: I
     map.current = m;
     m.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
     m.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
-    m.addControl(new maplibregl.AttributionControl({ compact: false }), 'bottom-right');
+    m.addControl(new maplibregl.AttributionControl({}), 'bottom-right');
     m.on('load', () => {
       m.addSource('victoria', { type: 'geojson', data: '/victoria.geojson', attribution: '<a href="https://www.geoboundaries.org/" target="_blank">geoBoundaries (CC BY 4.0)</a>' });
       m.addLayer({ id: 'victoria-outline', type: 'line', source: 'victoria', paint: { 'line-color': '#186454', 'line-width': 1.8, 'line-opacity': 0.65, 'line-dasharray': [4, 3] } });
@@ -45,10 +49,32 @@ export function MapView({ feature, focus }: { feature: Feature | null; focus?: I
       m.addLayer({ id: 'endpoint-points', type: 'circle', source: 'endpoints', paint: { 'circle-radius': 6, 'circle-color': ['match', ['get', 'kind'], 'source', '#186454', '#b84e36'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 } });
       setLoaded(true);
     });
-    m.on('moveend', () => { const c = m.getCenter(); setCenter(`${Math.abs(c.lat).toFixed(2)} ${c.lat < 0 ? 'S' : 'N'}, ${Math.abs(c.lng).toFixed(2)} ${c.lng < 0 ? 'W' : 'E'}`); });
-    m.on('error', e => { if (e.error?.message?.includes('victoria')) return; setError('Some map tiles are unavailable. Check your internet connection.'); });
+    const updateView = () => {
+      const c = m.getCenter(); setCenter(`${Math.abs(c.lat).toFixed(2)} ${c.lat < 0 ? 'S' : 'N'}, ${Math.abs(c.lng).toFixed(2)} ${c.lng < 0 ? 'W' : 'E'}`);
+      const b = m.getBounds(); setContourAvailability(contourCoverage([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], m.getZoom()));
+    };
+    m.on('moveend', updateView); m.on('load', updateView);
+    m.on('error', e => { if (('sourceId' in e && e.sourceId === CONTOUR_SOURCE) || e.error?.message?.includes('victoria')) return; setError('Some map tiles are unavailable. Check your internet connection.'); });
     return () => { m.remove(); map.current = null; };
   }, []);
+  useEffect(() => {
+    try { localStorage.setItem(CONTOUR_PREFERENCE, String(showContours)); } catch { /* Storage may be disabled; the overlay still works for this visit. */ }
+    if (!loaded || !map.current || !showContours) return;
+    const m = map.current;
+    setContourError(false); setContourLoading(true);
+    const loading = (event: maplibregl.MapSourceDataEvent) => { if (event.sourceId === CONTOUR_SOURCE) setContourLoading(true); };
+    const loadedSource = (event: maplibregl.MapSourceDataEvent) => { if (event.sourceId === CONTOUR_SOURCE && event.isSourceLoaded) setContourLoading(false); };
+    const failed = (event: maplibregl.ErrorEvent) => { if ('sourceId' in event && event.sourceId === CONTOUR_SOURCE) { setContourError(true); setContourLoading(false); } };
+    m.on('sourcedataloading', loading); m.on('sourcedata', loadedSource); m.on('error', failed);
+    m.addSource(CONTOUR_SOURCE, contourSource());
+    m.addLayer(contourLayer(), 'victoria-outline');
+    return () => {
+      m.off('sourcedataloading', loading); m.off('sourcedata', loadedSource); m.off('error', failed);
+      if (map.current !== m) return;
+      if (m.getLayer(CONTOUR_SOURCE)) m.removeLayer(CONTOUR_SOURCE);
+      if (m.getSource(CONTOUR_SOURCE)) m.removeSource(CONTOUR_SOURCE);
+    };
+  }, [loaded, showContours, contourAttempt]);
   useEffect(() => {
     if (!loaded || !map.current) return;
     (map.current.getSource('selected') as maplibregl.GeoJSONSource).setData(feature && !feature.extentEstimate ? { type: 'Feature', properties: {}, geometry: feature.geometry } : { type: 'FeatureCollection', features: [] });
@@ -77,7 +103,11 @@ export function MapView({ feature, focus }: { feature: Feature | null; focus?: I
   return <section className="map-region" aria-label="Interactive geographical map">
     <div className="map-canvas" ref={element} />
     <div className="map-summary"><div className="map-location"><MapPin size={14}/><span>{feature ? featureLabel(feature) : 'Southeastern Australia'}</span></div>
-    {feature && <section className="map-legend" aria-label="Map legend"><strong>Map legend</strong>{feature.extentEstimate ? <><label><input type="checkbox" aria-label={`Show ${feature.extentEstimate.label.toLowerCase()}`} checked={showEstimates} onChange={e => setShowEstimates(e.target.checked)}/><i className="legend-interpolated"/>{feature.extentEstimate.label}</label><span>Partial; boundary unverified</span></> : <><span><i className="legend-recorded"/>Recorded geometry</span><label><input type="checkbox" aria-label="Show interpolated connections" checked={showEstimates} disabled={!estimates.length} onChange={e => setShowEstimates(e.target.checked)}/><i className="legend-interpolated"/>Interpolated (unverified)</label></>}</section>}
+    <section className="map-legend" aria-label="Map legend"><strong>Map legend</strong>
+      <label className="contour-toggle"><input type="checkbox" aria-label="Show contours" checked={showContours} disabled={!loaded} onChange={e => setShowContours(e.target.checked)}/><i className="legend-contour"/>Contours (Victoria)</label>
+      {showContours && <span className="contour-status" role="status">{contourAvailability || (contourError ? 'Some contour tiles unavailable' : contourLoading ? 'Loading contours' : 'Elevations in metres')}{contourError && !contourAvailability && <button className="contour-retry" title="Retry contours" aria-label="Retry contours" onClick={() => setContourAttempt(n => n + 1)}><RefreshCw size={14}/></button>}</span>}
+      {feature && (feature.extentEstimate ? <><label><input type="checkbox" aria-label={`Show ${feature.extentEstimate.label.toLowerCase()}`} checked={showEstimates} onChange={e => setShowEstimates(e.target.checked)}/><i className="legend-interpolated"/>{feature.extentEstimate.label}</label><span>Partial; boundary unverified</span></> : <><span><i className="legend-recorded"/>Recorded geometry</span><label><input type="checkbox" aria-label="Show interpolated connections" checked={showEstimates} disabled={!estimates.length} onChange={e => setShowEstimates(e.target.checked)}/><i className="legend-interpolated"/>Interpolated (unverified)</label></>)}
+    </section>
     {error && <div className="map-error" role="status">{error}<button aria-label="Dismiss map message" onClick={() => setError('')}>×</button></div>}</div>
     <div className="map-tools">
       <button title="Fit selected feature" aria-label="Fit selected feature" onClick={() => { if (map.current) map.current.fitBounds(bounds, { padding: feature ? padding(map.current) : 50 }); }}><Maximize size={18}/></button>
