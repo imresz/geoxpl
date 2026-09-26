@@ -13,7 +13,7 @@ export const now = () => new Date().toISOString();
 export function createStore(path = 'runtime/geoxpl.sqlite') {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
-  db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
+  db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL;
     CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, query TEXT NOT NULL, normalized TEXT NOT NULL, type TEXT NOT NULL, status TEXT NOT NULL, phase TEXT NOT NULL, message TEXT NOT NULL, feature_id TEXT, attempts INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL, updated TEXT NOT NULL, UNIQUE(normalized,type));
     CREATE TABLE IF NOT EXISTS sources(id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL, created TEXT NOT NULL);
@@ -26,6 +26,9 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
     CREATE TABLE IF NOT EXISTS searches(id INTEGER PRIMARY KEY, query TEXT NOT NULL, type TEXT NOT NULL, created TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS ai_calls(id INTEGER PRIMARY KEY, created INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS feature_settings(job_id TEXT PRIMARY KEY REFERENCES jobs(id), data TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS job_policies(job_id TEXT PRIMARY KEY REFERENCES jobs(id), allow_research INTEGER NOT NULL CHECK(allow_research IN (0,1)));
+    CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY, manifest TEXT NOT NULL, created TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS batch_items(batch_id TEXT NOT NULL REFERENCES batches(id), position INTEGER NOT NULL, query TEXT NOT NULL, type TEXT NOT NULL, job_id TEXT NOT NULL REFERENCES jobs(id), disposition TEXT NOT NULL, PRIMARY KEY(batch_id,position), UNIQUE(batch_id,job_id));
   `);
   if (!db.prepare('PRAGMA table_info(jobs)').all().some(column => column.name === 'superseded_by')) {
     db.exec('ALTER TABLE jobs ADD COLUMN superseded_by TEXT REFERENCES jobs(id)');
@@ -63,6 +66,8 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
   };
   return {
     db, getJob, currentJob, event,
+    processingPolicy(id) { const row = db.prepare('SELECT allow_research FROM job_policies WHERE job_id=?').get(id); return { allowResearch: row ? !!row.allow_research : true }; },
+    setProcessingPolicy(id, { allowResearch }) { db.prepare('INSERT INTO job_policies VALUES(?,?) ON CONFLICT(job_id) DO UPDATE SET allow_research=excluded.allow_research').run(id, allowResearch ? 1 : 0); },
     supersedeJob(id, replacementId) {
       const old = getJob(id), replacement = currentJob(replacementId);
       if (!old || !replacement || old.id === replacement.id || old.type !== replacement.type ||

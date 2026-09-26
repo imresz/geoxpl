@@ -55,6 +55,25 @@ The simplified Victoria outline is from geoBoundaries, CC BY 4.0; exact metadata
 
 ## Local deployment (Windows, macOS or Linux)
 
+### Restart-safe river batches
+
+Start GeoXpl normally with `npm start`, then use a second terminal in the project directory:
+
+```powershell
+npm run batch -- enqueue scripts/data/victoria-long-rivers.json
+npm run batch -- status victoria-long-rivers-20-v1
+```
+
+The supplied manifest contains **20 long-river candidates**, a provisional top-20 selection rather than a certified ranking. Its `selectionNote` and references define the scope, screening limitations and exclusions. Do not present import order or partial measured lengths as an authoritative ranking. Approved datasets supply all actual geometry; screening references are not automatically approved geographic sources.
+
+**Administration > Batches** shows progress, outcomes and links to the saved results. A settled request may be partial or need evidence; it does not necessarily mean a verified full river. Existing active geometry is reused, including partial results. Existing active requests are joined without changing their settings or AI policy. Missing results are queued (or retried once) with automatic AI research disabled. Explicit administrator **New research** remains available. Failed and evidence-limited requests do not loop automatically; the worker continues with the next queued request.
+
+Batch creation is one SQLite transaction: the manifest, membership, jobs and per-job research policies persist together. Repeating the same command is a no-op; using the same batch ID with different content is rejected. Optional River suffixes are deduplicated. Other batches can reference the same job without duplicating geometry. The authenticated `/api/admin/batches` endpoints also support POST creation and GET progress.
+
+After shutdown, restart the same deployment with the same `GEOXPL_DB` (default `runtime/geoxpl.sqlite`) using `npm start`. Queued jobs continue and interrupted imports/processing are requeued. A partially executed river can restart from the beginning; completed features are not reprocessed just because the server restarts. SQLite uses WAL, full synchronous commits and a busy timeout. Back up the database using SQLite's backup API, not by copying an active `.sqlite` file alone.
+
+This does **not** install a Windows startup service, keep processing while the laptop is off, or require Codex to remain open. Keep one GeoXpl server/worker per database. The batch command only enqueues work; it does not start a second worker.
+
 ### Contour overlay
 
 The map legend has a **Contours (Victoria)** checkbox, available before or after a feature search. It defaults off and remembers its setting in browser local storage when permitted. The overlay sits above the OpenStreetMap basemap but below feature highlights. It changes no stored geometry, measurements or processing jobs, and needs no API key or Python setup.

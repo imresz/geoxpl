@@ -83,6 +83,10 @@ export function createWorker(store, options = {}) {
       return store.updateJob(job.id, output.status, 'awaiting_data', output.result.method === 'geofabric_directed_main_stem' ? output.result.warnings.join(' ') : candidate ? 'Main-stem candidate prepared. Verified branch choices, endpoints and any missing connections are still needed.' : output.result.mainStem.reason, featureId);
     }
     const diagnostics = { settings, status: output.status, warnings: results.flatMap(r => r.warnings), matches: results.map(r => ({ identityKey: r.identityKey, displayName: r.displayName, status: r.status, warnings: r.warnings, mainStem: r.mainStem })), identity: output.result?.identity, mainStem: output.result?.mainStem, selectedSourceId: results[0]?.selection.sourceId, comparisons: output.comparisons, importFailures: failures };
+    if (!forceResearch && store.processingPolicy(job.id).allowResearch === false) {
+      store.event(job.id, 'research_skipped', JSON.stringify({ reason: 'Batch policy: approved sources only', diagnostics }));
+      return store.updateJob(job.id, output.status, 'awaiting_data', `${output.message} Automatic AI research is disabled for this batch request.`, featureId);
+    }
     const relevant = results.length ? sources.filter(s => s.id === results[0].selection.sourceId) : sources;
     const relevantIds = new Set(relevant.map(s => s.id));
     const fingerprint = createHash('sha256').update(JSON.stringify({

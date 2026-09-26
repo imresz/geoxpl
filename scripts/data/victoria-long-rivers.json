@@ -1,0 +1,32 @@
+{
+  "id": "victoria-long-rivers-20-v1",
+  "name": "Victoria long rivers: 20 candidates",
+  "selectionNote": "Provisional top-20 candidate set, not a certified length ranking. Full named rivers passing through or bordering Victoria, including the Murray; not clipped at the state border. Selection uses the WaterwayMap/OSM length list as a screening reference, excludes creek-named waterways and the NSW Wakool River, and includes the Campaspe as one river despite its split screening entries. Order is alphabetical, not rank. Screening lengths and boundaries can be incomplete; exact top-20 membership remains unverified. Geometry, measured lengths and resolution status come only from approved GeoXpl sources, not these selection references.",
+  "references": [
+    { "title": "WaterwayMap: Victoria waterways (OpenStreetMap contributors; screening only, accessed 2026-09-26)", "url": "https://waterwaymap.org/river/region/AU-Victoria/" },
+    { "title": "North Central CMA: Campaspe River, 250 km (2021)", "url": "https://www.nccma.vic.gov.au/media/documents/river_health_snapshot_report_-_caring_for_the_campaspe_2021_0.pdf" },
+    { "title": "Geoscience Australia: river-length methods and Murray/Victoria boundary convention", "url": "https://www.ga.gov.au/scientific-topics/national-location-information/landforms/longest-rivers" }
+  ],
+  "entries": [
+    { "query": "Avoca River", "type": "river" },
+    { "query": "Barwon River", "type": "river" },
+    { "query": "Broken River", "type": "river" },
+    { "query": "Campaspe River", "type": "river" },
+    { "query": "Glenelg River", "type": "river" },
+    { "query": "Goulburn River", "type": "river" },
+    { "query": "Hopkins River", "type": "river" },
+    { "query": "Latrobe River", "type": "river" },
+    { "query": "Loddon River", "type": "river" },
+    { "query": "Macalister River", "type": "river" },
+    { "query": "Mitta Mitta River", "type": "river" },
+    { "query": "Murray River", "type": "river" },
+    { "query": "Ovens River", "type": "river" },
+    { "query": "Richardson River", "type": "river" },
+    { "query": "Snowy River", "type": "river" },
+    { "query": "Tambo River", "type": "river" },
+    { "query": "Thomson River", "type": "river" },
+    { "query": "Wannon River", "type": "river" },
+    { "query": "Wimmera River", "type": "river" },
+    { "query": "Yarra River", "type": "river" }
+  ]
+}

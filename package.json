@@ -11,6 +11,7 @@
     "start": "node --env-file-if-exists=.env server/index.js --production",
     "build": "tsc --noEmit && vite build",
     "test": "node --test tests/*.test.js",
+    "batch": "node --env-file-if-exists=.env scripts/batch-import.js",
     "admin:password": "node --env-file-if-exists=.env scripts/admin-password.js",
     "boundary:download": "node scripts/download-boundary.js"
   },

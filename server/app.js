@@ -9,6 +9,7 @@ import { estimatedConnectionsSchema } from './interpolation.js';
 import { valleyFloorSchema, landformEndpoint } from './valley-floor.js';
 import { terrainSchema, demEndpoint } from './terrain.js';
 import { formationJunctionsSchema } from './geofabric.js';
+import { enqueueBatch, listBatches, batchStatus } from './batches.js';
 
 export function createApp(store, config = {}) {
   const app = express(); app.disable('x-powered-by');
@@ -74,6 +75,19 @@ export function createApp(store, config = {}) {
   });
   app.post('/api/admin/logout', requireAdmin, (req, res) => { const token = tokenFrom(req); store.db.prepare('DELETE FROM sessions WHERE token=?').run(createHash('sha256').update(token).digest('hex')); res.clearCookie('geoxpl_session', { path: '/' }); res.json({ ok: true }); });
   app.use('/api/admin', requireAdmin);
+  app.get('/api/admin/batches', (_req, res) => res.json(listBatches(store)));
+  app.get('/api/admin/batches/:id', (req, res) => {
+    const batch = batchStatus(store, req.params.id);
+    if (!batch) return res.status(404).json({ error: 'Batch not found.' });
+    res.json(batch);
+  });
+  app.post('/api/admin/batches', (req, res) => {
+    try { const result = enqueueBatch(store, req.body); res.status(result.created ? 201 : 200).json(result.batch); }
+    catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: 'Invalid batch manifest.', details: error.issues });
+      res.status(409).json({ error: error.message });
+    }
+  });
   app.get('/api/admin/overview', (_req, res) => res.json({ jobs: store.jobs().map(j => ({ ...j, matches: store.jobFeatures(j.id).map(summary), settings: store.featureSettings(j.id) })), sources: store.sources(), reports: store.reports(), features: store.features().map(({ geometry, recordedNetwork, ...f }) => f), events: store.db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT 100').all(), searches: store.db.prepare('SELECT COUNT(*) AS count FROM searches').get().count, imports: store.db.prepare('SELECT id,source_id,job_id,created,checksum FROM imports ORDER BY created DESC LIMIT 100').all(), aiConfigured: aiConfigured(), aiHourlyLimit: Math.max(1, Math.min(30, Number(process.env.AI_REQUESTS_PER_HOUR) || 3)) }));
   const validLandformSource = source => (source.format !== 'vic-gmu250' || (source.type === 'valley' && source.url === landformEndpoint)) && (source.format !== 'ga-dem' || (source.type === 'valley' && source.url === demEndpoint));
   app.post('/api/admin/sources', (req, res) => {
