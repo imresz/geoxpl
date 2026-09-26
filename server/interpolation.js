@@ -68,6 +68,8 @@ export function withInterpolations(result, item, settings = {}) {
   if (start && context) {
     const nodes = item.metadata.geofabric.upstreamNodes || [];
     for (const record of context.incoming) {
+      const excluded = result.mainStem.headwater?.excludedNamedTributaries?.find(f => f.hydroId === record.properties.hydroid);
+      if (excluded) { notes.push(`${excluded.name} is a separately named tributary, not an assumed upstream extension of this feature.`); continue; }
       const node = nodes.find(n => n.properties.hydroid === record.properties.from_node);
       if (record.properties.to_node !== start.nodeId || !node || node.geometry?.type !== 'Point' || !valid(node.geometry.coordinates)) continue;
       if (distance(node.geometry.coordinates, start.coordinates) > maxAutomaticGapKm) { notes.push('An upstream alternative exceeds the 5 km automatic interpolation limit.'); continue; }

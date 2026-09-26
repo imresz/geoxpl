@@ -5,6 +5,7 @@ import { extendGeofabric, geofabricStreamUrl, isGeofabric, traceGeofabric } from
 import { processGeometry } from '../server/processors.js';
 import { createStore } from '../server/store.js';
 import { createWorker } from '../server/worker.js';
+import { formationJunctionsSchema } from '../server/geofabric.js';
 
 const boundary = { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[[0,0],[10,0],[10,10],[0,10],[0,0]]] } };
 const source = { id: 'bom', name: 'Synthetic Geofabric fixture', url: geofabricStreamUrl, type: 'river', format: 'arcgis', nameField: 'name', idField: 'objectid', status: 'approved', completeness: 'unknown', licence: 'Test only', attribution: 'Tests', version: 'fixture' };
@@ -137,6 +138,81 @@ function tributary() {
   item.metadata.geofabric.junctions = [{ nodeId: 3, incoming: [last,upstream], outgoing: [downstream] }];
   return item;
 }
+
+const formationReview = { nodeId: 3, tributaryHydroId: 12, joiningHydroId: 20, downstreamHydroId: 21,
+  joiningName: 'Joining Creek', downstreamName: 'Receiving River', evidenceUrl: 'https://example.org/naming',
+  note: 'Synthetic reviewed evidence: these named streams join to form a new named watercourse.' };
+function formation() {
+  const item = tributary(); item.metadata.geofabric.junctions[0].incoming[1].properties.name = 'JOINING CREEK';
+  return item;
+}
+const reviewedTrace = item => traceGeofabric(item, boundary, ['test river'], { formationJunctions: [formationReview] });
+
+test('reviewed formation verifies a new-name junction without adding either other watercourse', () => {
+  assert.equal(trace(formation()).status, 'partially_resolved');
+  const result = reviewedTrace(formation());
+  assert.equal(result.status, 'resolved');
+  assert.deepEqual(result.mainStem.selectedHydroIds, [11,12]);
+  assert.equal(result.mouth.joiningRiver, 'JOINING CREEK');
+  assert.equal(result.mouth.receivingRiver, 'RECEIVING RIVER');
+  assert.equal(result.mainStem.termination.rule, 'reviewed_named_watercourse_formation');
+  assert.equal(result.mainStem.termination.namingEvidence.evidenceUrl, formationReview.evidenceUrl);
+  assert.equal(result.mainStem.termination.nodeId, 3);
+});
+
+for (const [label, mutate] of [
+  ['missing node', i => i.metadata.geofabric.nodes.pop()],
+  ['changed joining name', i => { i.metadata.geofabric.junctions[0].incoming[1].properties.name = 'OTHER CREEK'; }],
+  ['extra upstream branch', i => i.metadata.geofabric.junctions[0].incoming.push(line(30,8,3,21,[[5,4],[4,1]],'THIRD CREEK'))],
+  ['missing tributary', i => i.metadata.geofabric.junctions[0].incoming.shift()],
+  ['changed downstream ID', i => { i.metadata.geofabric.junctions[0].outgoing[0].properties.hydroid = 99; }],
+  ['wrong flow link', i => { i.metadata.geofabric.junctions[0].incoming[1].properties.nextdownid = 99; }],
+  ['geometry gap', i => { i.metadata.geofabric.junctions[0].incoming[1].geometry.coordinates[1] = [4.001,1]; }],
+  ['unknown direction', i => { i.metadata.geofabric.junctions[0].incoming[1].properties.flowdir = 3; }],
+  ['changed junction node', i => { i.metadata.geofabric.nodes.at(-1).properties.ahgfftype = 7; }]
+]) test(`formation review cannot bypass ${label}`, () => {
+  const item = formation(); mutate(item);
+  const result = reviewedTrace(item);
+  assert.equal(result.status, 'partially_resolved'); assert.equal(result.mouth, null);
+});
+
+test('formation reviews validate IDs, HTTPS evidence and uniqueness', () => {
+  assert.ok(formationJunctionsSchema.safeParse([formationReview]).success);
+  for (const invalid of [[formationReview,formationReview], [{...formationReview,joiningHydroId:12}], [{...formationReview,evidenceUrl:'http://example.org'}], [{...formationReview,note:''}]]) {
+    assert.equal(formationJunctionsSchema.safeParse(invalid).success, false);
+  }
+});
+
+test('partial selection favours network identity and endpoint evidence, but respects explicit choice and resolution', () => {
+  const directed = formation();
+  const wide = { ...fixture(), source: { ...source, id: 'wide', url: 'https://example.org/lines', format: 'geojson' } };
+  wide.payload.features = [line(100,1,4,-1,[[1,1],[9,1]])];
+  const job = { query: 'Test River', type: 'river' };
+  for (const imports of [[wide,directed],[directed,wide]]) {
+    const result = processGeometry(job, imports, boundary).result;
+    assert.equal(result.selection.sourceId, source.id);
+    assert.equal(result.status, 'partially_resolved');
+    assert.ok(result.selection.comparisons.find(c=>c.sourceId===source.id).warnings.length);
+  }
+  assert.equal(processGeometry(job, [wide,directed], boundary, { preferredSourceId: 'wide' }).result.selection.sourceId, 'wide');
+  wide.source.completeness = 'complete';
+  assert.equal(processGeometry(job, [wide,directed], boundary).result.selection.sourceId, 'wide');
+});
+
+test('reviewed downstream junction does not approve an uncertain headwater or append a named tributary', () => {
+  const item = formation(), g = item.metadata.geofabric;
+  g.version = 'geofabric-network/3'; g.nodes[0].properties.ahgfftype = 4; g.namedStartIds = [1];
+  g.headwaterContexts = [{ nodeId:1, incoming:[line(50,50,1,11,[[0.99,1],[1,1]],''),line(51,51,1,11,[[1,0.99],[1,1]],'OTHER CREEK')] }];
+  g.upstreamNodes = [node(50,9,[0.99,1]),node(51,9,[1,0.99])];
+  const result = processGeometry({ query:'Test River',type:'river' },[item],boundary,{formationJunctions:[formationReview]}).result;
+  assert.equal(result.status,'partially_resolved'); assert.equal(result.source,null);
+  assert.equal(result.mouth.joiningRiver,'JOINING CREEK');
+  assert.deepEqual(result.mainStem.selectedHydroIds,[11,12]);
+  assert.deepEqual(result.mainStem.headwater.excludedNamedTributaries,[{hydroId:51,name:'OTHER CREEK'}]);
+  assert.deepEqual(result.interpolations.features.map(f=>f.properties.hydroId),[50]);
+  assert.match(result.interpolationSummary.notes.join(' '),/OTHER CREEK.*separately named/);
+  assert.ok(result.evidence.some(e=>e.role==='upstream_node_support'));
+});
 
 test('tributary ends at a published receiving-river junction, without adding receiving geometry', () => {
   const item = tributary(), result = trace(item);

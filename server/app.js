@@ -8,6 +8,7 @@ import { normalize } from './store.js';
 import { estimatedConnectionsSchema } from './interpolation.js';
 import { valleyFloorSchema, landformEndpoint } from './valley-floor.js';
 import { terrainSchema, demEndpoint } from './terrain.js';
+import { formationJunctionsSchema } from './geofabric.js';
 
 export function createApp(store, config = {}) {
   const app = express(); app.disable('x-powered-by');
@@ -29,8 +30,12 @@ export function createApp(store, config = {}) {
   const requireAdmin = (req, res, next) => authenticated(req) ? next() : res.status(401).json({ error: 'Administrator sign-in required.' });
   const summary = f => ({ id: f.id, name: f.name, displayName: f.displayName || f.name, locationLabel: f.locationLabel, locationDescription: f.locationDescription, type: f.type, status: f.status, lengthKm: f.lengthKm, areaKm2: f.areaKm2, extentEstimate: f.extentEstimate, bbox: f.displayBbox || f.bbox });
   const viewJob = job => {
+    const requested = job;
+    if (job.superseded_by) job = store.currentJob(job.id);
     const matches = store.jobFeatures(job.id);
-    return { id: job.id, query: job.query, type: job.type, status: job.status, phase: job.phase, message: job.message, created: job.created, updated: job.updated, selectionRequired: matches.length > 1, matches: matches.map(summary), feature: matches.length === 1 && job.feature_id ? store.feature(job.feature_id) : null };
+    return { id: job.id, query: job.query, type: job.type, status: job.status, phase: job.phase, message: job.message, created: job.created, updated: job.updated,
+      ...(requested.superseded_by ? { requestedJobId: requested.id, supersededBy: job.id } : {}),
+      selectionRequired: matches.length > 1, matches: matches.map(summary), feature: matches.length === 1 && job.feature_id ? store.feature(job.feature_id) : null };
   };
   const session = res => {
     const token = randomBytes(32).toString('hex');
@@ -90,20 +95,31 @@ export function createApp(store, config = {}) {
       store.invalidateFeature(j.job_id, 'Source configuration or approval changed. Reprocessing required.');
       store.updateJob(j.job_id, 'pending', 'awaiting_review', 'Source approval changed; awaiting reprocessing');
     }
-    if (newStatus === 'approved') for (const j of store.jobs().filter(j => j.type === source.type && !['importing', 'processing', 'researching', 'queued'].includes(j.phase))) store.retry(j.id);
+    if (newStatus === 'approved') for (const j of store.jobs().filter(j => !j.superseded_by && j.type === source.type && !['importing', 'processing', 'researching', 'queued'].includes(j.phase))) store.retry(j.id);
     res.json({ ok: true });
   });
   app.post('/api/admin/jobs/:id/retry', (req, res) => {
     const j = store.getJob(req.params.id); if (!j) return res.status(404).json({ error: 'Job not found.' });
+    if (j.superseded_by) return res.status(409).json({ error: 'This request is superseded. Use the current request.', replacementJobId: store.currentJob(j.id).id });
     if (['queued', 'importing', 'processing', 'researching'].includes(j.phase)) return res.json(viewJob(j));
     res.json(viewJob(store.retry(j.id)));
   });
+  app.post('/api/admin/jobs/:id/supersede', (req, res) => {
+    const input = z.object({ replacementJobId: z.string().min(1) }).parse(req.body);
+    if (!store.getJob(req.params.id)) return res.status(404).json({ error: 'Job not found.' });
+    try { store.supersedeJob(req.params.id, input.replacementJobId); }
+    catch (error) { return res.status(400).json({ error: error.message }); }
+    res.json(viewJob(store.getJob(req.params.id)));
+  });
   app.patch('/api/admin/jobs/:id/settings', (req, res) => {
     const job = store.getJob(req.params.id); if (!job) return res.status(404).json({ error: 'Job not found.' });
+    if (job.superseded_by) return res.status(409).json({ error: 'This request is superseded. Use the current request.' });
     if (['queued', 'importing', 'processing', 'researching'].includes(job.phase)) return res.status(409).json({ error: 'Wait for the active attempt to finish before changing feature settings.' });
-    const settings = z.object({ aliases: z.array(z.string().trim().min(2).max(150)).max(20), preferredSourceId: z.string().nullable(), estimatedConnections: estimatedConnectionsSchema.optional(), valleyFloor: valleyFloorSchema.nullable().optional(), terrain: terrainSchema.nullable().optional() }).parse(req.body);
+    const settings = z.object({ aliases: z.array(z.string().trim().min(2).max(150)).max(20), preferredSourceId: z.string().nullable(), estimatedConnections: estimatedConnectionsSchema.optional(), formationJunctions: formationJunctionsSchema.optional(), valleyFloor: valleyFloorSchema.nullable().optional(), terrain: terrainSchema.nullable().optional() }).parse(req.body);
     const previous = store.featureSettings(job.id);
     settings.aliases = [...new Set(settings.aliases.map(normalize))].filter(a => a !== job.normalized).sort();
+    if (settings.formationJunctions === undefined && previous.formationJunctions && JSON.stringify(previous.aliases) === JSON.stringify(settings.aliases)) settings.formationJunctions = previous.formationJunctions;
+    if (settings.formationJunctions?.length && job.type !== 'river') return res.status(400).json({ error: 'Named-watercourse junction reviews apply only to rivers.' });
     if (settings.estimatedConnections === undefined && previous.estimatedConnections && previous.preferredSourceId === settings.preferredSourceId && JSON.stringify(previous.aliases) === JSON.stringify(settings.aliases)) settings.estimatedConnections = previous.estimatedConnections;
     if (settings.valleyFloor === undefined && previous.valleyFloor && previous.preferredSourceId === settings.preferredSourceId && JSON.stringify(previous.aliases) === JSON.stringify(settings.aliases)) settings.valleyFloor = previous.valleyFloor;
     if (settings.terrain === undefined && settings.valleyFloor && previous.terrain && isDeepStrictEqual(previous.valleyFloor, settings.valleyFloor)) settings.terrain = previous.terrain;
@@ -122,6 +138,7 @@ export function createApp(store, config = {}) {
   });
   app.post('/api/admin/jobs/:id/research', (req, res) => {
     const job = store.getJob(req.params.id); if (!job) return res.status(404).json({ error: 'Job not found.' });
+    if (job.superseded_by) return res.status(409).json({ error: 'This request is superseded. Use the current request.' });
     if (['queued', 'importing', 'processing', 'researching'].includes(job.phase)) return res.status(409).json({ error: 'A processing attempt is already active.' });
     store.setting(`research:${job.id}`, 'true');
     store.event(job.id, 'research_requested', 'Administrator requested fresh research');

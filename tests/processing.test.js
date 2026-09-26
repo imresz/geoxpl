@@ -58,7 +58,7 @@ test('feature aliases are scoped to the request, never taken from the global sou
   assert.equal((await importSource(approved, 'Test River', load)).payload.features.length, 1);
   const result = await importSource(approved, 'test river', load, { aliases: ['River Test'] });
   assert.equal(result.payload.features.length, 2);
-  assert.deepEqual(result.metadata.queryTerms, ['test river','river test']);
+  assert.deepEqual(result.metadata.queryTerms, ['test river','test','river test']);
 });
 
 test('ArcGIS aliases union IDs and all geometry requests stay within gateway limits', async () => {

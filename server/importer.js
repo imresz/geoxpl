@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import { publicJson } from './network.js';
-import { normalize } from './store.js';
+import { normalize, featureSearchTerms } from './store.js';
 import { extendGeofabric, isGeofabric } from './geofabric.js';
 import { importValleyLandforms } from './valley-floor.js';
 
 export async function importSource(source, query, load = publicJson, identity = {}, context = {}) {
   if (source.status !== 'approved') throw new Error('Source is not approved.');
   if (source.format === 'vic-gmu250') return importValleyLandforms(source, identity, load);
-  const terms = [...new Set([query, ...(identity.aliases || [])].map(normalize))];
+  const terms = featureSearchTerms(query, source.type, identity.aliases);
   let records = [], metadata = {}, truncated = false;
   if (source.format === 'arcgis') {
     const base = source.url.replace(/\/$/, '');

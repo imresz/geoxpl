@@ -3,8 +3,16 @@ import { bbox, booleanIntersects, buffer, distance, feature, length } from '@tur
 import { normalize } from './store.js';
 import Graph from 'graphology';
 import { connectedComponents } from 'graphology-components';
+import { z } from 'zod';
 
 export const geofabricStreamUrl = 'https://hosting.wsapi.cloud.bom.gov.au/arcgis/rest/services/ahgf/Geofabric_V3x_All_Products/MapServer/6';
+const hydroId = z.number().int().positive().safe();
+export const formationJunctionsSchema = z.array(z.object({
+  nodeId: hydroId, tributaryHydroId: hydroId, joiningHydroId: hydroId, downstreamHydroId: hydroId,
+  joiningName: z.string().trim().min(2).max(150), downstreamName: z.string().trim().min(2).max(150),
+  evidenceUrl: z.url().startsWith('https://'), note: z.string().trim().min(20).max(2000)
+}).refine(v => new Set([v.tributaryHydroId, v.joiningHydroId, v.downstreamHydroId]).size === 3, 'Three distinct stream IDs are required.'))
+  .max(16).refine(rows => new Set(rows.map(r => r.nodeId)).size === rows.length, 'Junction nodes must be unique.');
 const base = geofabricStreamUrl.slice(0, -2);
 const limit = 10000;
 export const isGeofabric = source => source.format === 'arcgis' && [geofabricStreamUrl, geofabricStreamUrl.replace('/MapServer/', '/FeatureServer/')].includes(source.url.replace(/\/$/, ''));
@@ -89,7 +97,7 @@ function oriented(record) {
   return p.flowdir === 2 ? [...geometry.coordinates].reverse() : geometry.coordinates;
 }
 
-function confluenceAt(previous, junction, node, terms, byId) {
+function confluenceAt(previous, junction, node, terms, byId, formations) {
   if (!previous || !named(previous, terms) || !junction) return null;
   const { incoming, outgoing } = junction;
   if (outgoing.some(f => named(f, terms))) return null;
@@ -101,8 +109,20 @@ function confluenceAt(previous, junction, node, terms, byId) {
   if (!node || node.geometry?.type !== 'Point') return fail('a classified junction point is missing.');
   if (outgoing.length !== 1) return fail('the receiving river has ambiguous outgoing branches.');
   const downstream = receiving[0], name = normalize(downstream.properties.name);
-  const upstream = incoming.filter(f => f.properties.hydroid !== previous.properties.hydroid && normalize(String(f.properties.name || '')) === name);
-  if (!upstream.length) return null;
+  let upstream = incoming.filter(f => f.properties.hydroid !== previous.properties.hydroid && normalize(String(f.properties.name || '')) === name);
+  let formation;
+  if (!upstream.length) {
+    formation = formations.find(f => f.nodeId === junction.nodeId);
+    if (!formation) return null;
+    upstream = incoming.filter(f => f.properties.hydroid !== previous.properties.hydroid);
+    if (incoming.length !== 2 || upstream.length !== 1 ||
+        previous.properties.hydroid !== formation.tributaryHydroId ||
+        upstream[0].properties.hydroid !== formation.joiningHydroId || downstream.properties.hydroid !== formation.downstreamHydroId ||
+        normalize(String(upstream[0].properties.name || '')) !== normalize(formation.joiningName) || name !== normalize(formation.downstreamName) ||
+        named(upstream[0], terms) || normalize(formation.joiningName) === name) {
+      return fail('the reviewed named-watercourse formation no longer matches the published streams.');
+    }
+  }
   if (upstream.length !== 1) return fail('a unique same-named receiving river must enter and leave the junction.');
   if ([upstream[0], downstream].some(f => byId.has(f.properties.hydroid) && JSON.stringify(byId.get(f.properties.hydroid)) !== JSON.stringify(f))) return fail('receiving-river records conflict with the imported network.');
   const tributary = incoming.find(f => f.properties.hydroid === previous.properties.hydroid);
@@ -113,10 +133,13 @@ function confluenceAt(previous, junction, node, terms, byId) {
     const points = [oriented(previous).at(-1), oriented(upstream[0]).at(-1), oriented(downstream)[0]];
     if (points.some(point => distance(node.geometry.coordinates, point) > 0.000001)) return fail('stream endpoints do not coincide with the junction; no bridge was invented.');
   } catch (error) { return fail(error.message); }
-  return { kind: 'confluence', nodeId: junction.nodeId, receivingRiver: downstream.properties.name, tributaryHydroId: previous.properties.hydroid, receivingUpstreamHydroId: upstream[0].properties.hydroid, receivingDownstreamHydroId: downstream.properties.hydroid, rule: 'published_receiving_river_continuity', records: [upstream[0], downstream] };
+  return { kind: 'confluence', nodeId: junction.nodeId, receivingRiver: downstream.properties.name, tributaryHydroId: previous.properties.hydroid, receivingUpstreamHydroId: upstream[0].properties.hydroid, receivingDownstreamHydroId: downstream.properties.hydroid,
+    rule: formation ? 'reviewed_named_watercourse_formation' : 'published_receiving_river_continuity',
+    ...(formation ? { joiningRiver: upstream[0].properties.name, namingEvidence: formation } : {}), records: [upstream[0], downstream] };
 }
 
-export function traceGeofabricMatches(item, boundary, terms) {
+export function traceGeofabricMatches(item, boundary, terms, settings = {}) {
+  const formations = formationJunctionsSchema.parse(settings.formationJunctions || []);
   const trace = item.metadata?.geofabric;
   const records = item.payload.features;
   if (!trace || !['geofabric-network/1', 'geofabric-network/2', 'geofabric-network/3'].includes(trace.version)) return { error: 'Geofabric connectivity and endpoint evidence has not been imported.' };
@@ -147,7 +170,7 @@ export function traceGeofabricMatches(item, boundary, terms) {
     let current = head.properties.hydroid, previous = null, failure = null, confluence = null;
     const path = [], decisions = [], seen = new Set(), gaps = [];
     while (path.length < limit) {
-      const mouth = confluenceAt(previous, junctions.get(current), nodes.get(current), terms, byId);
+      const mouth = confluenceAt(previous, junctions.get(current), nodes.get(current), terms, byId, formations);
       if (mouth?.error) { failure = mouth.error; break; }
       if (mouth && [mouth.receivingUpstreamHydroId, mouth.receivingDownstreamHydroId].some(id => seen.has(id))) { failure = 'Receiving-river evidence reconnects to the traced route; a cycle cannot define a mouth.'; break; }
       if (mouth) { confluence = mouth; break; }
@@ -225,18 +248,18 @@ export function traceGeofabricMatches(item, boundary, terms) {
     const candidate = group[0];
     if (group.length > 1) candidate.warnings.push(`${group.length} named starting routes share this river network; headwater identity is ambiguous.`);
     const namedHydroIds = [...new Set(group.flatMap(c => c.path.filter(p => named(p.record, terms)).map(p => p.record.properties.hydroid)))].sort((a, b) => a - b);
-    return formatRoute(candidate, item, records, trace, `geofabric:river:${namedHydroIds[0]}`);
+    return formatRoute(candidate, item, records, trace, `geofabric:river:${namedHydroIds[0]}`, terms);
   }).sort((a, b) => a.identityKey.localeCompare(b.identityKey));
   return { results };
 }
 
-export function traceGeofabric(item, boundary, terms) {
-  const output = traceGeofabricMatches(item, boundary, terms);
+export function traceGeofabric(item, boundary, terms, settings = {}) {
+  const output = traceGeofabricMatches(item, boundary, terms, settings);
   if (output.error) return output;
   return output.results.length === 1 ? output.results[0] : { error: 'Multiple distinct same-named rivers were found. Select an identity from the matching features.' };
 }
 
-function formatRoute(candidate, item, records, trace, identityKey) {
+function formatRoute(candidate, item, records, trace, identityKey, terms) {
   const route = candidate.path.map(p => p.record);
   const parts = [];
   for (const p of candidate.path) {
@@ -249,7 +272,14 @@ function formatRoute(candidate, item, records, trace, identityKey) {
   const endpoint = (node, label) => node ? { coordinates: node.geometry.coordinates, nodeId: node.properties.hydroid, objectId: node.id ?? node.properties.objectid, sourceUrl: trace.nodesUrl, classification: label } : null;
   const { records: confluenceRecords = [], ...termination } = candidate.confluence || { kind: candidate.outlet ? 'network_terminus' : 'unverified', nodeId: candidate.outlet?.properties.hydroid };
   const mouth = endpoint(candidate.outlet, candidate.confluence ? 'BoM river confluence' : 'BoM network terminus');
-  if (mouth && candidate.confluence) mouth.receivingRiver = candidate.confluence.receivingRiver;
+  if (mouth && candidate.confluence) {
+    mouth.receivingRiver = candidate.confluence.receivingRiver;
+    if (candidate.confluence.joiningRiver) {
+      mouth.joiningRiver = candidate.confluence.joiningRiver;
+      mouth.namingEvidenceUrl = candidate.confluence.namingEvidence.evidenceUrl;
+      mouth.classification = 'Reviewed named-watercourse junction';
+    }
+  }
   const headwaterRecords = candidate.headwaterContext?.incoming || [];
   const headwaterNodes = (trace.upstreamNodes || []).filter(n => headwaterRecords.some(f => f.properties.from_node === n.properties.hydroid));
   const namedStart = candidate.verifiedHeadwater ? null : endpoint(candidate.head, 'BoM named reach start (headwater unverified)');
@@ -260,7 +290,8 @@ function formatRoute(candidate, item, records, trace, identityKey) {
     identity: { excludedRecords: records.length - route.length, scopeBufferKm: 2, namedLengthFraction: candidate.nameFraction },
     mainStem: {
       status: candidate.warnings.length ? 'candidate' : 'published_network', method: 'named_directed_geofabric', namedStart,
-      headwater: { status: candidate.verifiedHeadwater ? 'published_headwater' : 'unverified_named_start', upstreamHydroIds: headwaterRecords.map(f => f.properties.hydroid) },
+      headwater: { status: candidate.verifiedHeadwater ? 'published_headwater' : 'unverified_named_start', upstreamHydroIds: headwaterRecords.map(f => f.properties.hydroid),
+        excludedNamedTributaries: headwaterRecords.filter(f => normalize(String(f.properties.name || '')) && !named(f, terms)).map(f => ({ hydroId: f.properties.hydroid, name: f.properties.name })) },
       termination, componentRoutes: parts.map(coordinates => ({ endpoints: [coordinates[0], coordinates.at(-1)], lengthKm: length(feature({ type: 'LineString', coordinates })) })),
       branchDecisions: candidate.decisions, preferencesUrl: trace.preferencesUrl,
       coordinateGaps: candidate.path.flatMap((p, i) => p.gap ? [{ coordinates: [candidate.path[i - 1].coordinates.at(-1), p.coordinates[0]], nodeId: p.record.properties.from_node }] : []),

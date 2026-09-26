@@ -4,6 +4,11 @@ import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 export const normalize = value => value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-AU');
+export function featureSearchTerms(query, type, aliases = []) {
+  const name = normalize(query || '');
+  const base = type === 'river' && name !== 'river' ? name.replace(/ river$/, '') : '';
+  return [...new Set([...(base ? [`${base} river`, base] : [name]), ...aliases.map(normalize)].filter(Boolean))];
+}
 export const now = () => new Date().toISOString();
 export function createStore(path = 'runtime/geoxpl.sqlite') {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -22,6 +27,9 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
     CREATE TABLE IF NOT EXISTS ai_calls(id INTEGER PRIMARY KEY, created INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS feature_settings(job_id TEXT PRIMARY KEY REFERENCES jobs(id), data TEXT NOT NULL);
   `);
+  if (!db.prepare('PRAGMA table_info(jobs)').all().some(column => column.name === 'superseded_by')) {
+    db.exec('ALTER TABLE jobs ADD COLUMN superseded_by TEXT REFERENCES jobs(id)');
+  }
   if (!db.prepare('PRAGMA table_info(features)').all().some(column => column.name === 'identity_key')) {
     db.exec(`BEGIN IMMEDIATE;
       CREATE TABLE features_many(id TEXT PRIMARY KEY, job_id TEXT NOT NULL, identity_key TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, data TEXT NOT NULL, created TEXT NOT NULL, UNIQUE(job_id,identity_key));
@@ -31,6 +39,15 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
       COMMIT;`);
   }
   const getJob = id => db.prepare('SELECT * FROM jobs WHERE id=?').get(id);
+  const currentJob = id => {
+    let job = getJob(id);
+    const visited = new Set();
+    while (job?.superseded_by) {
+      if (visited.has(job.id)) throw Error('Cyclic request replacement.');
+      visited.add(job.id); job = getJob(job.superseded_by);
+    }
+    return job;
+  };
   const event = (job, action, detail) => db.prepare('INSERT INTO events(job_id,action,detail,created) VALUES(?,?,?,?)').run(job, action, detail, now());
   const invalidateDrainageDependents = ids => {
     if (!ids.length) return;
@@ -45,7 +62,27 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
     }
   };
   return {
-    db, getJob, event,
+    db, getJob, currentJob, event,
+    supersedeJob(id, replacementId) {
+      const old = getJob(id), replacement = currentJob(replacementId);
+      if (!old || !replacement || old.id === replacement.id || old.type !== replacement.type ||
+          !featureSearchTerms(old.query, old.type).includes(replacement.normalized)) throw Error('Replacement must be the same named feature and type.');
+      if (old.superseded_by) {
+        if (currentJob(old.id)?.id === replacement.id) return old;
+        throw Error('This request already has a replacement.');
+      }
+      if (['queued', 'importing', 'processing', 'researching'].includes(old.phase)) throw Error('Wait for active processing to finish.');
+      if (this.jobFeatures(old.id).length) throw Error('A request with active geometry cannot be superseded.');
+      if (replacement.status !== 'resolved' || !this.jobFeatures(replacement.id).length) throw Error('Replacement must have a current resolved result.');
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        db.prepare("UPDATE jobs SET superseded_by=?,status='superseded',phase='superseded',message=?,updated=? WHERE id=?")
+          .run(replacement.id, `Superseded by ${replacement.query}. Original history retained.`, now(), old.id);
+        event(old.id, 'superseded', JSON.stringify({ replacementJobId: replacement.id, previousStatus: old.status, previousPhase: old.phase, previousMessage: old.message }));
+        db.exec('COMMIT');
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
+      return getJob(old.id);
+    },
     featureSettings(id) { const r = db.prepare('SELECT data FROM feature_settings WHERE job_id=?').get(id); return r ? JSON.parse(r.data) : { aliases: [], preferredSourceId: null }; },
     setFeatureSettings(id, data) { db.prepare('INSERT INTO feature_settings VALUES(?,?) ON CONFLICT(job_id) DO UPDATE SET data=excluded.data').run(id, JSON.stringify(data)); event(id, 'identity_updated', 'Feature aliases and source selection updated'); },
     invalidateFeature(jobId, reason) {
@@ -61,7 +98,11 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
     request(query, type) {
       const canonical = query.trim().replace(/\s+/g, ' ');
       db.prepare('INSERT INTO searches(query,type,created) VALUES(?,?,?)').run(canonical, type, now());
-      const existing = db.prepare('SELECT * FROM jobs WHERE normalized=? AND type=?').get(normalize(canonical), type);
+      const terms = featureSearchTerms(canonical, type);
+      // Older databases can have both spellings: prefer usable geometry, preserving all history.
+      const existing = db.prepare(`SELECT * FROM jobs WHERE superseded_by IS NULL AND type=? AND normalized IN (${terms.map(() => '?').join(',')})
+        ORDER BY EXISTS(SELECT 1 FROM features WHERE job_id=jobs.id AND active=1) DESC,
+          (status='resolved') DESC, (status='pending') DESC, created, id LIMIT 1`).get(type, ...terms);
       if (existing) return existing;
       const id = randomUUID();
       db.prepare('INSERT INTO jobs(id,query,normalized,type,status,phase,message,created,updated) VALUES(?,?,?,?,?,?,?,?,?)').run(id, canonical, normalize(canonical), type, 'pending', 'queued', 'Preparing feature', now(), now());
@@ -71,7 +112,7 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
       db.prepare('UPDATE jobs SET status=?,phase=?,message=?,feature_id=COALESCE(?,feature_id),updated=? WHERE id=?').run(status, phase, message, featureId, now(), id);
       event(id, phase, message); return getJob(id);
     },
-    retry(id) { db.prepare('UPDATE jobs SET attempts=attempts+1 WHERE id=?').run(id); return this.updateJob(id, 'pending', 'queued', 'Queued for another attempt'); },
+    retry(id) { if (getJob(id)?.superseded_by) throw Error('This request is superseded. Use the current request.'); db.prepare('UPDATE jobs SET attempts=attempts+1 WHERE id=?').run(id); return this.updateJob(id, 'pending', 'queued', 'Queued for another attempt'); },
     jobs() { return db.prepare('SELECT * FROM jobs ORDER BY updated DESC').all(); },
     sources() { return db.prepare('SELECT * FROM sources ORDER BY created DESC').all().map(r => ({ ...JSON.parse(r.data), id: r.id, status: r.status, created: r.created })); },
     addSource(data) {

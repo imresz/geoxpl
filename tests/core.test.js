@@ -58,7 +58,7 @@ test('ArcGIS quotes query literals and imports all ID batches', async () => {
     return { features: u.searchParams.get('objectIds').split(',').map(() => line([[1,1],[2,2]])) };
   });
   assert.equal(result.payload.features.length, 501); assert.equal(result.truncated, false);
-  assert.match(new URL(urls[1]).searchParams.get('where'), /O''BRIEN/); assert.equal(urls.length, 8);
+  assert.match(new URL(urls[1]).searchParams.get('where'), /O''BRIEN/); assert.equal(urls.length, 9);
 });
 test('source requests block local, metadata, loopback and mapped private addresses', () => {
   for (const ip of ['127.0.0.1', '10.0.0.1', '169.254.169.254', '::1', '::ffff:192.168.1.1', 'fc00::1']) assert.equal(publicAddress(ip), false, ip);

@@ -10,6 +10,7 @@ export function createWorker(store, options = {}) {
   let busy = false, stopped = false;
   store.db.prepare("UPDATE jobs SET phase='queued',message='Resuming interrupted processing' WHERE status='pending' AND phase IN ('importing','processing','researching')").run();
   async function run(job) {
+    if (store.getJob(job.id)?.superseded_by) return;
     const settings = store.featureSettings(job.id);
     const sources = store.sources().filter(s => s.status === 'approved' && s.type === job.type && s.format !== 'ga-dem' && (s.format !== 'vic-gmu250' || settings.valleyFloor?.sourceId === s.id)).sort((a, b) => a.id.localeCompare(b.id));
     const forceResearch = store.setting(`research:${job.id}`) === 'true';

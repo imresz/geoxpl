@@ -17,6 +17,7 @@ test('contour styling labels numeric elevations and changes detail by scale with
   assert.match(contourStyle,/IEEERemainder/);assert.doesNotMatch(contourStyle,/PropertyIsLike/);
   assert.match(contourStyle,/<ogc:Literal>500<\/ogc:Literal>/);assert.match(contourStyle,/<ogc:Literal>100<\/ogc:Literal>/);
   assert.match(contourStyle,/<Label><ogc:PropertyName>altitude/);
+  assert.deepEqual([...contourStyle.matchAll(/name="font-size">([^<]+)</g)].map(match => Number(match[1])), [12,12,12]);
   assert.equal(new URL(contourSource().tiles[0]).searchParams.get('sld_body'),contourStyle);
 });
 

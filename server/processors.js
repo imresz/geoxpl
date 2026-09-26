@@ -3,11 +3,11 @@ import { connectedComponents } from 'graphology-components';
 import { bbox, length, area, feature, booleanValid, booleanIntersects, buffer, distance } from '@turf/turf';
 import { mainStemCandidate } from './main-stem.js';
 import { isGeofabric, traceGeofabricMatches } from './geofabric.js';
-import { normalize } from './store.js';
+import { featureSearchTerms } from './store.js';
 import { withInterpolations } from './interpolation.js';
 import { processValleyFloor } from './valley-floor.js';
 
-export const algorithmVersion = 'directed-geofabric/5.0.0';
+export const algorithmVersion = 'directed-geofabric/5.1.0';
 const scopeRegions = new WeakMap();
 export function validCoordinates(geometry) {
   let count = 0;
@@ -159,7 +159,7 @@ function processDirectedSource(item, result) {
 function sourceMatches(job, item, boundary, settings, context) {
   if (item.source.format === 'vic-gmu250') return job.type === 'valley' ? [processValleyFloor(item, boundary, settings, context.drainage)] : [];
   if (job.type === 'river' && isGeofabric(item.source)) {
-    const traced = traceGeofabricMatches(item, boundary, [job.query, ...(settings.aliases || [])].filter(Boolean).map(normalize));
+    const traced = traceGeofabricMatches(item, boundary, featureSearchTerms(job.query, job.type, settings.aliases), settings);
     return traced.error ? [{ sourceId: item.source.id, sourceName: item.source.name, error: traced.error }] : traced.results.map(result => ({ ...processDirectedSource(item, result), identityRank: 2 }));
   }
   const records = item.payload.features;
@@ -201,21 +201,23 @@ function labelMatches(job, results, boundary) {
 
 export function processGeometry(job, imports, boundary, settings = {}, context = {}) {
   const candidates = imports.flatMap(item => sourceMatches(job, item, boundary, settings, context));
-  const comparisons = candidates.map(c => ({ sourceId: c.sourceId, sourceName: c.sourceName, identityKey: c.result?.identityKey, coverage: c.coverage, error: c.error, excludedRecords: c.excludedRecords ?? c.result?.identity.excludedRecords, records: c.result?.evidence.length, lengthKm: c.result?.lengthKm, bbox: c.result?.bbox, components: c.result?.graph?.components, branches: c.result?.graph?.branchJunctions }));
+  const comparisons = candidates.map(c => ({ sourceId: c.sourceId, sourceName: c.sourceName, identityKey: c.result?.identityKey, identityRank: c.identityRank || 0, status: c.result?.status, warnings: c.result?.warnings, verifiedEndpoints: Number(!!c.result?.source) + Number(!!c.result?.mouth), coverage: c.coverage, error: c.error, excludedRecords: c.excludedRecords ?? c.result?.identity.excludedRecords, records: c.result?.evidence.length, lengthKm: c.result?.lengthKm, bbox: c.result?.bbox, components: c.result?.graph?.components, branches: c.result?.graph?.branchJunctions }));
   const eligible = imports.map(item => {
     const matches = candidates.filter(c => c.sourceId === item.source.id && c.result);
-    return { sourceId: item.source.id, matches, identityRank: Math.max(0, ...matches.map(c => c.identityRank || 0)), resolved: matches.length > 0 && matches.every(c => c.result.status === 'resolved'), warnings: matches.reduce((n, c) => n + c.result.warnings.length, 0) / matches.length, spanKm: Math.max(0, ...matches.map(c => c.spanKm)) };
+    return { sourceId: item.source.id, matches, identityRank: Math.max(0, ...matches.map(c => c.identityRank || 0)), resolved: matches.length > 0 && matches.every(c => c.result.status === 'resolved'), endpoints: matches.reduce((n, c) => n + Number(!!c.result.source) + Number(!!c.result.mouth), 0) / matches.length, warnings: matches.reduce((n, c) => n + c.result.warnings.length, 0) / matches.length, spanKm: Math.max(0, ...matches.map(c => c.spanKm)) };
   }).filter(c => c.matches.length);
   const multiple = eligible.some(c => c.matches.length > 1);
   // Comparison datasets never contribute extra geometry or length to the selected source.
-  eligible.sort((a, b) => (multiple ? b.identityRank - a.identityRank : 0) || Number(b.resolved) - Number(a.resolved) || (multiple ? a.warnings - b.warnings : 0) || b.spanKm - a.spanKm || a.sourceId.localeCompare(b.sourceId));
+  eligible.sort((a, b) => (multiple ? b.identityRank - a.identityRank : 0) || Number(b.resolved) - Number(a.resolved) ||
+    (!a.resolved && !b.resolved ? b.identityRank - a.identityRank || b.endpoints - a.endpoints || a.warnings - b.warnings : 0) ||
+    b.spanKm - a.spanKm || a.sourceId.localeCompare(b.sourceId));
   const chosen = settings.preferredSourceId ? eligible.find(c => c.sourceId === settings.preferredSourceId) : eligible[0];
   if (!chosen) return {
     status: job.type === 'valley' && !imports.length ? 'missing_capability' : 'insufficient_data', comparisons,
     message: settings.preferredSourceId ? 'The selected source did not provide usable, in-scope geometry. Review source selection.' : 'No usable named geometry associated with Victoria was found.'
   };
   const results = labelMatches(job, chosen.matches.map(candidate => {
-    const selected = { ...candidate.result, selection: { sourceId: chosen.sourceId, mode: settings.preferredSourceId ? 'administrator' : multiple ? 'identity_evidence_then_resolution_and_coverage' : 'resolved_then_widest_coverage', comparisons } };
+    const selected = { ...candidate.result, selection: { sourceId: chosen.sourceId, mode: settings.preferredSourceId ? 'administrator' : multiple ? 'identity_evidence_then_resolution_and_coverage' : 'resolution_then_identity_and_endpoints_then_coverage', comparisons } };
     return withInterpolations(selected, imports.find(i => i.source.id === chosen.sourceId), settings);
   }), boundary);
   const status = results.every(r => r.status === 'resolved') ? 'resolved' : 'partially_resolved';

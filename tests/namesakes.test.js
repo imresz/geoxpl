@@ -31,6 +31,15 @@ test('distinct same-named directed networks produce two labelled features, never
   }
 });
 
+test('omitting River still traces and distinguishes both same-named Geofabric networks', () => {
+  const full = processGeometry(job, [fixture()], boundary);
+  const short = processGeometry({ ...job, query: 'Test' }, [fixture()], boundary);
+  assert.equal(short.status, full.status);
+  assert.equal(short.results.length, 2);
+  assert.deepEqual(short.results.map(r => r.identityKey), full.results.map(r => r.identityKey));
+  assert.deepEqual(short.results.map(r => r.geometry), full.results.map(r => r.geometry));
+});
+
 test('network identities and ordering survive reversed imports and equivalent source endpoints', () => {
   const a = fixture(), b = fixture();
   b.payload.features.reverse(); b.metadata.geofabric.nodes.reverse();
@@ -147,6 +156,9 @@ test('worker stores both choices without repeated AI research and public API ret
     assert.equal(found.selectionRequired, true); assert.equal(found.feature, null); assert.equal(found.matches.length, 2);
     assert.ok(found.matches.every(m => !m.geometry && m.displayName));
     assert.deepEqual(found.matches.map(f => f.id).sort(), firstIds);
+    const shortName = await (await fetch(root + '/api/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: 'Test', type: 'river' }) })).json();
+    assert.equal(shortName.id, found.id); assert.equal(shortName.selectionRequired, true);
+    assert.deepEqual(shortName.matches, found.matches);
     const polled = await (await fetch(root + `/api/jobs/${savedJob.id}`)).json(); assert.deepEqual(polled.matches, found.matches);
     const full = await (await fetch(root + `/api/features/${found.matches[0].id}`)).json(); assert.ok(full.geometry);
     const catalogue = await (await fetch(root + '/api/catalogue')).json(); assert.equal(catalogue.length, 1); assert.equal(catalogue[0].status, 'resolved');
