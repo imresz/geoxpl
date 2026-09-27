@@ -29,6 +29,9 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
     CREATE TABLE IF NOT EXISTS job_policies(job_id TEXT PRIMARY KEY REFERENCES jobs(id), allow_research INTEGER NOT NULL CHECK(allow_research IN (0,1)));
     CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY, manifest TEXT NOT NULL, created TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS batch_items(batch_id TEXT NOT NULL REFERENCES batches(id), position INTEGER NOT NULL, query TEXT NOT NULL, type TEXT NOT NULL, job_id TEXT NOT NULL REFERENCES jobs(id), disposition TEXT NOT NULL, PRIMARY KEY(batch_id,position), UNIQUE(batch_id,job_id));
+    CREATE TABLE IF NOT EXISTS report_workflows(report_id TEXT PRIMARY KEY REFERENCES reports(id), state TEXT NOT NULL, reason TEXT NOT NULL, steps TEXT NOT NULL, updated TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS report_actions(id TEXT PRIMARY KEY, report_id TEXT NOT NULL REFERENCES reports(id), kind TEXT NOT NULL, status TEXT NOT NULL, input TEXT NOT NULL, result TEXT NOT NULL, baseline TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS report_actions_queue ON report_actions(status,created);
   `);
   if (!db.prepare('PRAGMA table_info(jobs)').all().some(column => column.name === 'superseded_by')) {
     db.exec('ALTER TABLE jobs ADD COLUMN superseded_by TEXT REFERENCES jobs(id)');
@@ -156,7 +159,7 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
     jobFeatures(id) { return db.prepare('SELECT data FROM features WHERE job_id=? AND active=1 ORDER BY identity_key').all(id).map(r => JSON.parse(r.data)); },
     features() { return db.prepare('SELECT data FROM features WHERE active=1 ORDER BY created DESC').all().map(r => JSON.parse(r.data)); },
     report(jobId, data) { const id = randomUUID(); db.prepare('INSERT INTO reports VALUES(?,?,?,?,?)').run(id, jobId, JSON.stringify(data), 'pending', now()); return id; },
-    reports() { return db.prepare('SELECT * FROM reports ORDER BY created DESC').all().map(r => ({ ...r, data: JSON.parse(r.data) })); },
+    reports() { return db.prepare('SELECT * FROM reports ORDER BY created DESC,rowid DESC').all().map(r => ({ ...r, data: JSON.parse(r.data) })); },
     close() { db.close(); }
   };
 }

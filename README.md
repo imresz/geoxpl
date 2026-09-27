@@ -9,7 +9,7 @@ GeoXpl opens on a map of southeastern Australia. Enter a feature name, select **
 - MapLibre map, OpenStreetMap basemap, Victoria outline, pan/zoom, feature fit and provenance panel.
 - Optional Victorian contour overlay, independent of feature processing, with elevation labels and remembered visibility.
 - Persistent feature catalogue, jobs, research reports, source registry, usage counts and audit events in SQLite.
-- Password-protected administration at `/admin`, with source and research approval/rejection, editable source settings, job retry and processing activity.
+- Password-protected administration at `/admin`, with source approval, actionable research reports, editable source settings, job retry and processing activity.
 - Named-feature import from approved ArcGIS layers and HTTPS GeoJSON collections. Raw import snapshots, checksums, source IDs and derivation history are retained.
 - Per-feature approved aliases and source selection; conservative river identity, connectivity and branch checks; published valley polygon import and reviewed [partial valley-floor estimates](#partial-valley-floor-estimates), with optional [terrain-derived slope extensions](#terrain-derived-valley-extents).
 - BoM Geofabric directed river routes, with published headwater/terminal nodes, flow decisions and source-record provenance.
@@ -52,6 +52,22 @@ For any feature geometry, additional evidence-located anchor pairs can be retain
 For recorded features, the shared gap-overlay output is a GeoJSON `interpolations` collection, with an unverified classification, method, anchor references and per-connection distance. `displayBbox` includes the overlays; `geometry`, `bbox`, recorded length/area and verified endpoints retain their original meanings. `interpolationSummary.totalOverlayLengthKm` is the sum of displayed lines, including mutually exclusive alternatives, not a complete feature length. Unknown endpoint locations are not extrapolated arbitrarily. No feature names or coordinates are hard-coded in these rules. Derived valley polygons instead carry an `extentEstimate` classification: their entire displayed boundary and measured area are estimates, not recorded named-feature extents.
 
 The simplified Victoria outline is from geoBoundaries, CC BY 4.0; exact metadata is in `public/boundary-source.json`. Its scope checks are suitable for this pilot, not cadastral or border-sensitive decisions. The catalogue and source registry initially contain no approved feature data. A source catalogue URL in the researcher is a discovery hint only.
+
+## Research report actions
+
+Open a report under **Administration > Research**. Its **Actions** tab supports **Investigate next step**, followed by **Review proposed changes** and **Apply and reprocess**. Investigations are read-only and do not invoke AI. They are saved in SQLite, run through the background worker and recover after a server restart.
+
+- **Check registered source:** query an existing ArcGIS layer or GeoJSON source by exact feature name and optional alternative names. Retain query URLs, fields, match counts and up to five sampled records with an unverified map preview. A sample is not a complete extent or proof of identity. Pending sources can be checked but must go through separate licence/attribution approval before use; approval changes require a fresh investigation.
+- **Review feature retry:** propose reprocessing the current feature with its existing settings and approved datasets.
+- **Process prerequisite river:** for a valley report, explicitly name a river to process or reuse. This does not infer principal drainage, associate the river with the valley, select landform records or approve a valley boundary.
+
+Application requires an explicit confirmation. Source preference and aliases are individually opt-in; aliases also require an identity-evidence note. An existing reviewed valley definition, terrain setup or geographic connection/junction review cannot be silently overwritten through this shortcut. Use **Feature settings** for those changes. Proposals become unusable if the report, source, processing settings or feature result changes. Application and its audit entry are transactional, and repeated submission cannot queue the action twice.
+
+Newly queued processing uses approved data with automatic AI research disabled. Joining an already active prerequisite preserves that job's existing policy. **New research** on the feature remains a separate, explicit AI request. The report shows before/current processing outcomes: an applied action or handled recommendation does not mean the feature is geographically resolved.
+
+Under **Recommendations**, assign each original step to **GeoXpl investigation**, **Your decision** or **Specialist / development**, and save evidence/notes and an Open, Handled or Deferred disposition. Recommendation text is never executed as arbitrary code or converted automatically into geographic approval. GMU landform selection, terrain interpretation and unsupported processor work remain explicit geographic/development tasks; this workflow does not automate those decisions.
+
+**Report disposition and notes** retains **Mark reviewed**, plus **Defer**, **Dismiss** and **Resume report**. Deferral/dismissal requires a reason, cancels unapplied report investigations, and does not alter source approvals, feature geometry or already queued feature processing. Research filters separate active, deferred and historical/dismissed reports. A newer report or superseded request makes the old report read-only. **History** preserves investigation results, review decisions, selected changes and linked processing outcomes. The additive `report_workflows` and `report_actions` tables are created on startup; existing reports and approvals are retained.
 
 ## Local deployment (Windows, macOS or Linux)
 

@@ -10,6 +10,7 @@ import { valleyFloorSchema, landformEndpoint } from './valley-floor.js';
 import { terrainSchema, demEndpoint } from './terrain.js';
 import { formationJunctionsSchema } from './geofabric.js';
 import { enqueueBatch, listBatches, batchStatus } from './batches.js';
+import { workflowView, queueInvestigation, applyInvestigation, changeReportState, updateRecommendation, recordReportReview } from './report-workflow.js';
 
 export function createApp(store, config = {}) {
   const app = express(); app.disable('x-powered-by');
@@ -75,6 +76,15 @@ export function createApp(store, config = {}) {
   });
   app.post('/api/admin/logout', requireAdmin, (req, res) => { const token = tokenFrom(req); store.db.prepare('DELETE FROM sessions WHERE token=?').run(createHash('sha256').update(token).digest('hex')); res.clearCookie('geoxpl_session', { path: '/' }); res.json({ ok: true }); });
   app.use('/api/admin', requireAdmin);
+  const reportOperation = fn => (req, res) => {
+    try { res.json(fn(req)); }
+    catch (error) { res.status(error instanceof z.ZodError ? 400 : 409).json({ error: error instanceof z.ZodError ? error.issues.map(i => i.message).join('; ') : error.message }); }
+  };
+  app.get('/api/admin/reports/:id/workflow', reportOperation(req => workflowView(store, req.params.id)));
+  app.post('/api/admin/reports/:id/investigate', reportOperation(req => queueInvestigation(store, req.params.id, req.body)));
+  app.post('/api/admin/reports/:id/actions/:actionId/apply', reportOperation(req => applyInvestigation(store, req.params.id, req.params.actionId, req.body)));
+  app.post('/api/admin/reports/:id/state', reportOperation(req => changeReportState(store, req.params.id, req.body)));
+  app.patch('/api/admin/reports/:id/steps/:index', reportOperation(req => updateRecommendation(store, req.params.id, z.coerce.number().int().min(0).parse(req.params.index), req.body)));
   app.get('/api/admin/batches', (_req, res) => res.json(listBatches(store)));
   app.get('/api/admin/batches/:id', (req, res) => {
     const batch = batchStatus(store, req.params.id);
@@ -161,14 +171,21 @@ export function createApp(store, config = {}) {
   app.patch('/api/admin/reports/:id', (req, res) => {
     const input = z.object({ status: z.enum(['approved', 'rejected']), notes: z.string().max(4000) }).parse(req.body);
     const report = store.db.prepare('SELECT * FROM reports WHERE id=?').get(req.params.id); if (!report) return res.status(404).json({ error: 'Report not found.' });
+    const flow = store.db.prepare('SELECT state FROM report_workflows WHERE report_id=?').get(report.id);
+    if (flow && flow.state !== 'active') return res.status(409).json({ error: 'Resume this report before marking it reviewed.' });
     const data = { ...JSON.parse(report.data), adminNotes: input.notes, reviewed: new Date().toISOString() };
+    store.db.exec('BEGIN IMMEDIATE');
+    try {
     store.db.prepare('UPDATE reports SET data=?,status=? WHERE id=?').run(JSON.stringify(data), input.status, report.id);
     store.event(report.job_id, `research_${input.status}`, input.notes || 'Administrator reviewed recommendation');
+    recordReportReview(store, report.id, input.status, input.notes);
     const job = store.getJob(report.job_id);
     const latest = store.reports().find(r => r.job_id === report.job_id);
     if (job?.phase === 'awaiting_review' && job.status !== 'resolved' && latest?.id === report.id) {
       store.updateJob(job.id, job.status, 'awaiting_data', 'Research has been reviewed. Updated geographic evidence or processing capability is needed; no further review is requested.');
     }
+    store.db.exec('COMMIT');
+    } catch (error) { store.db.exec('ROLLBACK'); throw error; }
     res.json({ ok: true });
   });
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Unknown API endpoint.' }));

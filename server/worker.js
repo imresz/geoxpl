@@ -4,11 +4,13 @@ import { research, aiConfigured } from './research.js';
 import { createHash } from 'node:crypto';
 import { deriveTerrainValley } from './terrain.js';
 import { drainageFingerprint } from './valley-floor.js';
+import { runInvestigation } from './report-workflow.js';
 
 export function createWorker(store, options = {}) {
   const importer = options.importer || importSource, researcher = options.researcher || research;
   let busy = false, stopped = false;
   store.db.prepare("UPDATE jobs SET phase='queued',message='Resuming interrupted processing' WHERE status='pending' AND phase IN ('importing','processing','researching')").run();
+  store.db.prepare("UPDATE report_actions SET status='queued' WHERE kind='investigate' AND status='running'").run();
   async function run(job) {
     if (store.getJob(job.id)?.superseded_by) return;
     const settings = store.featureSettings(job.id);
@@ -122,6 +124,13 @@ export function createWorker(store, options = {}) {
   }
   async function tick() {
     if (busy || stopped) return;
+    const investigation = store.db.prepare("SELECT id FROM report_actions WHERE kind='investigate' AND status='queued' ORDER BY created,id LIMIT 1").get();
+    if (investigation) {
+      busy = true;
+      try { await runInvestigation(store, investigation.id, { load: options.investigationLoader }); }
+      finally { busy = false; }
+      return;
+    }
     const job = store.db.prepare("SELECT * FROM jobs WHERE status='pending' AND phase='queued' ORDER BY created LIMIT 1").get();
     if (!job) return;
     busy = true;
