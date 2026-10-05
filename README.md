@@ -8,7 +8,7 @@ GeoXpl opens on a map of southeastern Australia. Enter a feature name, select **
 
 - MapLibre map, OpenStreetMap basemap, Victoria outline, pan/zoom, feature fit and provenance panel.
 - Optional Victorian contour overlay, independent of feature processing, with elevation labels and remembered visibility.
-- Persistent feature catalogue, jobs, research reports, source registry, usage counts and audit events in SQLite.
+- Persistent feature catalogue with separate Resolved and Partially resolved lists, jobs, research reports, source registry, usage counts and audit events in SQLite. Both lists open saved geometry and provenance. Estimated valley areas retain their estimated label. `GET /api/catalogue` defaults to resolved features; `?status=partially_resolved` returns partial features and `?status=all` returns both groups. Inactive historical geometry and superseded requests remain excluded.
 - Password-protected administration at `/admin`, with source approval, actionable research reports, editable source settings, job retry and processing activity.
 - Named-feature import from approved ArcGIS layers and HTTPS GeoJSON collections. Raw import snapshots, checksums, source IDs and derivation history are retained.
 - Per-feature approved aliases and source selection; conservative river identity, connectivity and branch checks; published valley polygon import and reviewed [partial valley-floor estimates](#partial-valley-floor-estimates), with optional [terrain-derived slope extensions](#terrain-derived-valley-extents).
@@ -27,7 +27,7 @@ For recorded features, only one dataset supplies a search's displayed geometries
 
 ### Same-named features
 
-A search can own several processed features. When the selected dataset identifies multiple in-scope matches, processing stores them all and the public search returns a location-labelled selection list, not an arbitrarily chosen river. Selecting an entry loads its geometry and provenance; **Matching features** returns to the list. Repeat searches reuse the list without another AI call. Each entry keeps its own resolution status and estimates. Partial entries can be selected but remain outside the resolved-only Catalogue tab.
+A search can own several processed features. When the selected dataset identifies multiple in-scope matches, processing stores them all and the public search returns a location-labelled selection list, not an arbitrarily chosen river. Selecting an entry loads its geometry and provenance; **Matching features** returns to the list. Repeat searches reuse the list without another AI call. Each entry keeps its own resolution status and estimates. Partial entries appear in the Catalogue tab's separate **Partially resolved** list.
 
 Geofabric separates named routes that do not share named network nodes. Starting routes that join the same named network remain competing headwaters of one partial identity, not separate rivers. Other datasets can identify separate rivers or valleys using published `vicnames_id`, `named_feature_id` or `hydronameoid` fields, when every returned record has a valid positive ID in that field. Per-segment object IDs and disconnection alone are not evidence of distinct named features. Dotted gap processing runs only after identity separation and cannot automatically join different matches.
 

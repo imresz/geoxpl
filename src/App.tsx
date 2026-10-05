@@ -3,6 +3,7 @@ import { Compass, Search, ArrowUpRight, Waves, Mountain, Database, LoaderCircle,
 import { MapView } from './MapView';
 import { api, statusLabel, featureLabel, type Job, type Feature, type FeatureSummary, type Interpolation } from './api';
 import { Admin } from './Admin';
+import './catalogue.css';
 
 export function Brand() { return <a className="brand" href="/"><span className="brand-symbol"><Compass size={23}/></span><span>Geo<span className="brand-accent">Xpl</span></span></a>; }
 export function App() {
@@ -17,7 +18,7 @@ export function App() {
   const [focusedEstimate, setFocusedEstimate] = useState<Interpolation | null>(null);
   useEffect(() => { setShowNetwork(false); setShowFloor(false); setFocusedEstimate(null); }, [selected]);
   const displayedFeature = useMemo(() => selected && showNetwork && selected.recordedNetwork ? { ...selected, geometry: selected.recordedNetwork.geometry, bbox: selected.recordedNetwork.bbox, displayBbox: selected.recordedNetwork.bbox, interpolations: undefined } : selected && showFloor && selected.valleyFloor ? { ...selected, ...selected.valleyFloor, displayBbox: selected.valleyFloor.bbox } : selected, [selected, showNetwork, showFloor]);
-  const refreshCatalogue = () => api<FeatureSummary[]>('/catalogue').then(setCatalogue).catch(() => {});
+  const refreshCatalogue = () => api<FeatureSummary[]>('/catalogue?status=all').then(setCatalogue).catch(() => {});
   useEffect(() => { refreshCatalogue(); return () => active.current?.abort(); }, []);
   useEffect(() => {
     const id = new URLSearchParams(location.search).get('job');
@@ -72,7 +73,15 @@ export function App() {
       <aside className="feature-panel" ref={panel}>
         <div className="panel-kicker"><span className="live-dot"/>VICTORIA & BEYOND</div>
         {error && <p className="error" role="alert">{error}</p>}
-        {tab === 'catalogue' ? <><div className="panel-title"><h1>Feature catalogue</h1><Database size={20}/></div><p className="muted small">{catalogue.length} resolved {catalogue.length === 1 ? 'feature' : 'features'}</p><div className="catalogue-list">{catalogue.map(f => <button key={f.id} disabled={!!loadingFeature} onClick={() => selectFeature(f.id, true)}>{f.type === 'river' ? <Waves size={20}/> : <Mountain size={20}/>}<span><strong>{featureLabel(f)}</strong><small>{f.type} · {f.lengthKm ? `${f.lengthKm.toFixed(1)} km` : `${f.areaKm2?.toFixed(1)} km²`}</small></span>{loadingFeature === f.id ? <LoaderCircle className="spin" size={16}/> : <ArrowUpRight size={16}/>}</button>)}</div>{!catalogue.length && <div className="empty-state"><Database size={30}/><h2>No processed features yet</h2><p>Completed features will appear here.</p></div>}</> : selected ? <>
+        {tab === 'catalogue' ? <><div className="panel-title"><h1>Feature catalogue</h1><Database size={20}/></div><p className="muted small">{catalogue.length} saved {catalogue.length === 1 ? 'feature' : 'features'}</p>
+          {catalogue.length ? [{status:'resolved',title:'Resolved'},{status:'partially_resolved',title:'Partially resolved'}].map(group => {
+            const features = catalogue.filter(f => f.status === group.status).sort((a,b) => featureLabel(a).localeCompare(featureLabel(b)));
+            return <section className="catalogue-group" key={group.status} aria-label={`${group.title} features`}><h2>{group.title}<span className={`badge ${group.status === 'resolved' ? 'green' : 'amber'}`}>{features.length}</span></h2>
+              <div className="catalogue-list">{features.map(f => <button key={f.id} disabled={!!loadingFeature} onClick={() => selectFeature(f.id, true)}>{f.type === 'river' ? <Waves size={20}/> : <Mountain size={20}/>}<span><strong>{featureLabel(f)}</strong><small>{f.type} · {f.lengthKm != null ? `${f.lengthKm.toFixed(1)} km` : f.areaKm2 != null ? `${f.areaKm2.toFixed(1)} km²${f.extentEstimate ? ' estimated' : ''}` : 'Measurement unavailable'}</small>{f.extentEstimate && <small>{f.extentEstimate.label}</small>}</span>{loadingFeature === f.id ? <LoaderCircle className="spin" size={16}/> : <ArrowUpRight size={16}/>}</button>)}</div>
+              {!features.length && <p className="muted small">No {group.title.toLowerCase()} features yet.</p>}
+            </section>;
+          }) : <div className="empty-state"><Database size={30}/><h2>No processed features yet</h2><p>Saved features will appear here.</p></div>}
+        </> : selected ? <>
           <button className="text-button back" onClick={() => { setSelected(null); if (!job?.selectionRequired) setJob(null); }}><ArrowLeft size={15}/>{job?.selectionRequired ? 'Matching features' : 'Overview'}</button>
           <div className="feature-type">{selected.type === 'river' ? <Waves size={17}/> : <Mountain size={17}/>} {selected.type}</div>
           <h1 className="feature-name">{featureLabel(selected)}</h1><span className={`badge ${selected.status === 'resolved' ? 'green' : 'amber'}`}>{statusLabel(selected.status)}</span>

@@ -47,7 +47,10 @@ export function createApp(store, config = {}) {
   };
   app.get('/api/config', (_req, res) => res.json({ name: 'GeoXpl', interactiveWaitMs: 5000, types: ['river', 'valley'] }));
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
-  app.get('/api/catalogue', (_req, res) => res.json(store.features().filter(f => f.status === 'resolved').map(summary)));
+  app.get('/api/catalogue', (req, res) => {
+    const status = z.enum(['resolved', 'partially_resolved', 'all']).default('resolved').parse(req.query.status);
+    res.json(store.features().filter(f => status === 'all' ? ['resolved', 'partially_resolved'].includes(f.status) : f.status === status).map(summary));
+  });
   app.post('/api/search', rateLimit({ windowMs: 60000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many searches. Please wait a minute.' } }), (req, res) => {
     const input = z.object({ query: z.string().trim().min(2).max(150), type: z.enum(['river', 'valley']) }).parse(req.body);
     const count = store.db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE status='pending' AND phase='queued'").get().n;
