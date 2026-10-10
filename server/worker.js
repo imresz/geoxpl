@@ -127,7 +127,7 @@ export function createWorker(store, options = {}) {
     const investigation = store.db.prepare("SELECT id FROM report_actions WHERE kind='investigate' AND status='queued' ORDER BY created,id LIMIT 1").get();
     if (investigation) {
       busy = true;
-      try { await runInvestigation(store, investigation.id, { load: options.investigationLoader }); }
+      try { await runInvestigation(store, investigation.id, { load: options.investigationLoader, researcher:options.researcher }); }
       finally { busy = false; }
       return;
     }

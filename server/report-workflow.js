@@ -4,6 +4,8 @@ import { bbox, coordEach, featureCollection } from '@turf/turf';
 import { normalize, featureSearchTerms, now } from './store.js';
 import { publicJson } from './network.js';
 import { algorithmVersion } from './processors.js';
+import { gapAnchor, gapVersion, investigateGap } from './gap-investigation.js';
+import { sourceSchema } from './research.js';
 
 const active = j => j?.status === 'pending' && ['queued', 'importing', 'processing', 'researching'].includes(j.phase);
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -31,16 +33,22 @@ const summary = (store, job) => ({ id: job.id, name: job.query, type: job.type, 
   matches: store.jobFeatures(job.id).map(f => ({ id: f.id, name: f.displayName || f.name, status: f.status, lengthKm: f.lengthKm, areaKm2: f.areaKm2 })) });
 function snapshot(store, reportId, input) {
   const report = getReport(store, reportId), job = store.getJob(report.job_id);
+  let anchor;
+  if(input.operation==='gap') {try {anchor=gapAnchor(store,job);} catch {anchor=null;} }
   return hash({ report: { id: report.id, nextSteps: report.data.nextSteps, candidates: report.data.candidates, evidence: report.data.evidence }, job: summary(store, job), settings: store.featureSettings(job.id),
-    sources: store.sources().filter(s => input.operation !== 'source' || s.id === input.sourceId), algorithmVersion });
+    sources: store.sources().filter(s => input.operation !== 'source' || s.id === input.sourceId), algorithmVersion,
+    ...(input.operation === 'gap' ? {gapVersion,anchor} : {}) });
 }
-export const investigationSchema = z.object({ operation: z.enum(['source', 'prerequisite', 'retry']), sourceId: z.string().max(100).optional(),
+export const investigationSchema = z.object({ operation: z.enum(['source', 'prerequisite', 'retry', 'gap']), sourceId: z.string().max(100).optional(),
+  targetName:z.string().trim().min(2).max(150).optional(), radiusKm:z.number().min(0.5).max(20).optional(), discover:z.boolean().optional(), refresh:z.boolean().optional(),
   query: z.string().trim().min(2).max(150).optional(), aliases: z.array(z.string().trim().min(2).max(150)).max(20).default([]), stepIndex: z.number().int().min(0).optional()
 }).strict().superRefine((input, ctx) => {
   if (input.operation === 'source' && !input.sourceId) ctx.addIssue({ code: 'custom', message: 'Select a registered source.' });
   if (input.operation === 'prerequisite' && !input.query) ctx.addIssue({ code: 'custom', message: 'Enter the prerequisite river name.' });
   if (input.operation !== 'source' && (input.aliases.length || input.sourceId)) ctx.addIssue({ code: 'custom', message: 'Source and aliases only apply to source checks.' });
   if (input.operation !== 'prerequisite' && input.query) ctx.addIssue({ code: 'custom', message: 'Only prerequisite processing accepts a separate river name.' });
+  if (input.operation === 'gap' && !input.targetName) ctx.addIssue({code:'custom',message:'Enter the destination waterbody name.'});
+  if (input.operation !== 'gap' && ['targetName','radiusKm','discover','refresh'].some(k=>input[k]!==undefined)) ctx.addIssue({code:'custom',message:'Gap settings only apply to geographic-gap investigation.'});
 });
 function validStep(report, index) { if (index !== undefined && !report.data.nextSteps?.[index]) throw Error('Recommendation not found.'); }
 
@@ -64,6 +72,16 @@ export function queueInvestigation(store, id, raw) {
   const input = investigationSchema.parse(raw), { report, job } = editable(store, id);
   validStep(report, input.stepIndex);
   if (active(job)) throw Error('Wait for the feature processing attempt to finish.');
+  if (input.operation === 'gap') {
+    gapAnchor(store,job);
+    input.radiusKm ??= 10; input.discover ??= true;
+    if (!input.refresh) {
+      const baseline=snapshot(store,id,input);
+      const cached=store.db.prepare("SELECT * FROM report_actions WHERE report_id=? AND kind='investigate' AND status='ready' ORDER BY created DESC").all(id).map(decode)
+        .find(a=>a.input.operation==='gap'&&a.input.targetName===input.targetName&&a.input.radiusKm===input.radiusKm&&a.input.discover===input.discover&&a.baseline===baseline&&Date.now()-Date.parse(a.updated)<30*86400000);
+      if (cached) return cached;
+    }
+  }
   if (store.db.prepare("SELECT id FROM report_actions WHERE report_id=? AND kind='investigate' AND status IN ('queued','running')").get(id)) throw Error('An investigation is already queued or running.');
   if (input.operation === 'source' && !store.sources().some(s => s.id === input.sourceId && s.status !== 'rejected')) throw Error('Choose a current, non-rejected registered source.');
   if (input.operation === 'prerequisite' && job.type !== 'valley') throw Error('Prerequisite river processing is available for valley reports.');
@@ -141,7 +159,7 @@ export async function runInvestigation(store, actionId, options = {}) {
   try {
     const { job } = editable(store, action.report_id);
     if (action.baseline !== snapshot(store, action.report_id, action.input)) throw Error('Inputs changed since this investigation was queued. Start a new investigation.');
-    updateAction(store, action.id, 'running', { message: 'Checking the selected operation' });
+    updateAction(store, action.id, 'running', { ...action.result, message: 'Checking the selected operation' });
     let result;
     if (action.input.operation === 'source') {
       const source = store.sources().find(s => s.id === action.input.sourceId);
@@ -149,6 +167,12 @@ export async function runInvestigation(store, actionId, options = {}) {
       result.beforeSettings = store.featureSettings(job.id);
       result.proposedAliases = [...new Set(action.input.aliases.map(normalize))].filter(a => !featureSearchTerms(job.query,job.type,store.featureSettings(job.id).aliases).includes(a));
       if (result.proposedAliases.length) result.message += ' Suggested aliases still require your identity decision; name matches alone do not prove equivalence.';
+    } else if (action.input.operation === 'gap') {
+      result = await investigateGap(store,job,action.input,action.result,async checkpoint=>{
+        if (getAction(store,action.id)?.status!=='running') throw Error('Investigation cancelled.');
+        if (snapshot(store,action.report_id,action.input)!==action.baseline) throw Error('Inputs changed during investigation. Start a new investigation.');
+        updateAction(store,action.id,'running',checkpoint);
+      },options);
     } else if (action.input.operation === 'prerequisite') {
       const terms = featureSearchTerms(action.input.query, 'river');
       const matches = store.jobs().filter(j => !j.superseded_by && j.type === 'river' && terms.includes(j.normalized));
@@ -160,7 +184,20 @@ export async function runInvestigation(store, actionId, options = {}) {
     if (getAction(store, action.id).status !== 'running') return;
     editable(store, action.report_id);
     if (snapshot(store, action.report_id, action.input) !== action.baseline) { updateAction(store, action.id, 'stale', { ...result, message: 'Inputs changed during investigation. Investigate again before applying.' }); return; }
-    updateAction(store, action.id, 'ready', result);
+    if (action.input.operation === 'gap') {
+      store.db.exec('BEGIN IMMEDIATE');
+      try {
+        result.candidateIds=[];
+        for (const raw of result.discovered || []) {
+          const candidate=sourceSchema.parse(raw), existing=store.sources().find(s=>s.url.toLowerCase()===candidate.url.toLowerCase());
+          if (existing?.status==='rejected') continue;
+          result.candidateIds.push(existing?.id || store.addSource(candidate));
+        }
+        store.db.prepare('UPDATE report_actions SET baseline=? WHERE id=?').run(snapshot(store,action.report_id,action.input),action.id);
+        updateAction(store,action.id,'ready',result);
+        store.db.exec('COMMIT');
+      } catch(error) {store.db.exec('ROLLBACK');throw error;}
+    } else updateAction(store, action.id, 'ready', result);
     store.event(job.id, 'report_investigated', JSON.stringify({ reportId: action.report_id, actionId }));
   } catch (error) {
     if (['queued','running'].includes(getAction(store, actionId)?.status)) updateAction(store, actionId, 'failed', { message: error.message });
@@ -168,7 +205,7 @@ export async function runInvestigation(store, actionId, options = {}) {
 }
 
 export function applyInvestigation(store, reportId, actionId, raw) {
-  const input = z.object({ confirmed: z.literal(true), useSource: z.boolean().default(false), useAliases: z.boolean().default(false), note: z.string().trim().max(2000).default('') }).strict().parse(raw);
+  const input = z.object({ confirmed: z.literal(true), useSource: z.boolean().default(false), useAliases: z.boolean().default(false), useEstimate:z.boolean().default(false), note: z.string().trim().max(2000).default('') }).strict().parse(raw);
   const { job } = editable(store, reportId), action = getAction(store, actionId);
   if (!action || action.report_id !== reportId || action.kind !== 'investigate') throw Error('Investigation not found.');
   if (action.status === 'applied') return workflowView(store, reportId);
@@ -177,6 +214,8 @@ export function applyInvestigation(store, reportId, actionId, raw) {
   if (active(job)) throw Error('Wait for active feature processing to finish.');
   if (action.input.operation !== 'source' && (input.useSource || input.useAliases)) throw Error('Source changes require a source investigation.');
   if (input.useAliases && !input.note) throw Error('Record why the proposed aliases identify the same feature.');
+  if (input.useEstimate && action.input.operation!=='gap') throw Error('Estimated connections require a gap investigation.');
+  if (action.input.operation==='gap' && (!input.useEstimate || !input.note || !action.result.estimate)) throw Error('Explicitly approve the estimated connection and record your review evidence.');
   store.db.exec('BEGIN IMMEDIATE');
   try {
     let target = job, changed = false, newTarget = false;
@@ -201,6 +240,15 @@ export function applyInvestigation(store, reportId, actionId, raw) {
         store.setFeatureSettings(job.id, settings);
         store.invalidateFeature(job.id, 'Research action changed feature settings; reprocessing required.');
       }
+    }
+    if (action.input.operation==='gap') {
+      const previous=store.featureSettings(job.id), connection=action.result.estimate;
+      const connections=[...(previous.estimatedConnections||[])];
+      if (!connections.some(c=>hash(c)===hash(connection))) connections.push(connection);
+      if (connections.length>32) throw Error('At most 32 estimated connections are supported.');
+      store.setFeatureSettings(job.id,{...previous,estimatedConnections:connections});
+      changed=hash(previous.estimatedConnections||[])!==hash(connections);
+      if (changed) store.invalidateFeature(job.id,'Reviewed terminal connection estimate added; reprocessing required.');
     }
     const reused = action.input.operation === 'prerequisite' && target.status === 'resolved' && store.jobFeatures(target.id).length;
     const joined = active(target);
