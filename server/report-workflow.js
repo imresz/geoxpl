@@ -5,6 +5,7 @@ import { normalize, featureSearchTerms, now } from './store.js';
 import { publicJson } from './network.js';
 import { algorithmVersion } from './processors.js';
 import { gapAnchor, gapVersion, investigateGap } from './gap-investigation.js';
+import { headwaterAnchor, headwaterVersion, investigateHeadwaters } from './headwater-investigation.js';
 import { sourceSchema } from './research.js';
 
 const active = j => j?.status === 'pending' && ['queued', 'importing', 'processing', 'researching'].includes(j.phase);
@@ -35,11 +36,12 @@ function snapshot(store, reportId, input) {
   const report = getReport(store, reportId), job = store.getJob(report.job_id);
   let anchor;
   if(input.operation==='gap') {try {anchor=gapAnchor(store,job);} catch {anchor=null;} }
+  if(input.operation==='headwaters') {try {anchor=headwaterAnchor(store,job);} catch {anchor=null;} }
   return hash({ report: { id: report.id, nextSteps: report.data.nextSteps, candidates: report.data.candidates, evidence: report.data.evidence }, job: summary(store, job), settings: store.featureSettings(job.id),
     sources: store.sources().filter(s => input.operation !== 'source' || s.id === input.sourceId), algorithmVersion,
-    ...(input.operation === 'gap' ? {gapVersion,anchor} : {}) });
+    ...(input.operation === 'gap' ? {gapVersion,anchor} : {}), ...(input.operation === 'headwaters' ? {headwaterVersion,anchor} : {}) });
 }
-export const investigationSchema = z.object({ operation: z.enum(['source', 'prerequisite', 'retry', 'gap']), sourceId: z.string().max(100).optional(),
+export const investigationSchema = z.object({ operation: z.enum(['source', 'prerequisite', 'retry', 'gap', 'headwaters']), sourceId: z.string().max(100).optional(),
   targetName:z.string().trim().min(2).max(150).optional(), radiusKm:z.number().min(0.5).max(20).optional(), discover:z.boolean().optional(), refresh:z.boolean().optional(),
   query: z.string().trim().min(2).max(150).optional(), aliases: z.array(z.string().trim().min(2).max(150)).max(20).default([]), stepIndex: z.number().int().min(0).optional()
 }).strict().superRefine((input, ctx) => {
@@ -48,7 +50,8 @@ export const investigationSchema = z.object({ operation: z.enum(['source', 'prer
   if (input.operation !== 'source' && (input.aliases.length || input.sourceId)) ctx.addIssue({ code: 'custom', message: 'Source and aliases only apply to source checks.' });
   if (input.operation !== 'prerequisite' && input.query) ctx.addIssue({ code: 'custom', message: 'Only prerequisite processing accepts a separate river name.' });
   if (input.operation === 'gap' && !input.targetName) ctx.addIssue({code:'custom',message:'Enter the destination waterbody name.'});
-  if (input.operation !== 'gap' && ['targetName','radiusKm','discover','refresh'].some(k=>input[k]!==undefined)) ctx.addIssue({code:'custom',message:'Gap settings only apply to geographic-gap investigation.'});
+  if (input.operation !== 'gap' && ['targetName','radiusKm','discover'].some(k=>input[k]!==undefined)) ctx.addIssue({code:'custom',message:'Gap settings only apply to geographic-gap investigation.'});
+  if (!['gap','headwaters'].includes(input.operation)&&input.refresh!==undefined) ctx.addIssue({code:'custom',message:'Refresh applies to geographic investigations only.'});
 });
 function validStep(report, index) { if (index !== undefined && !report.data.nextSteps?.[index]) throw Error('Recommendation not found.'); }
 
@@ -62,9 +65,10 @@ export function workflowView(store, id) {
       if (target) action.outcome = summary(store, target);
     }
     if (action.kind === 'investigate' && action.status === 'ready' && action.baseline !== snapshot(store, id, action.input)) action.stale = true;
-    if(action.input.operation==='gap') {
+    if(action.input.operation==='gap'||action.input.operation==='headwaters') {
       // Keep full query snapshots in SQLite, not in the browser's polling responses.
-      action.result={...action.result,checks:action.result.checks?.map(({records,...check})=>check),routes:action.result.routes?.map(({geometry,...route})=>route)};
+      action.result={...action.result,checks:action.result.checks?.map(({records,...check})=>check),routes:action.result.routes?.map(({geometry,...route})=>route),branches:undefined};
+      if(action.input.operation==='headwaters'&&action.result.anchor) action.result.anchor={...action.result.anchor,context:undefined};
     }
     return action;
   });
@@ -76,6 +80,15 @@ export function queueInvestigation(store, id, raw) {
   const input = investigationSchema.parse(raw), { report, job } = editable(store, id);
   validStep(report, input.stepIndex);
   if (active(job)) throw Error('Wait for the feature processing attempt to finish.');
+  if (input.operation === 'headwaters') {
+    headwaterAnchor(store,job);
+    if (!input.refresh) {
+      const baseline=snapshot(store,id,input);
+      const cached=store.db.prepare("SELECT * FROM report_actions WHERE report_id=? AND kind='investigate' AND status='ready' ORDER BY created DESC").all(id).map(decode)
+        .find(a=>a.input.operation==='headwaters'&&a.baseline===baseline&&Date.now()-Date.parse(a.updated)<30*86400000);
+      if(cached)return cached;
+    }
+  }
   if (input.operation === 'gap') {
     gapAnchor(store,job);
     input.radiusKm ??= 10; input.discover ??= true;
@@ -171,12 +184,13 @@ export async function runInvestigation(store, actionId, options = {}) {
       result.beforeSettings = store.featureSettings(job.id);
       result.proposedAliases = [...new Set(action.input.aliases.map(normalize))].filter(a => !featureSearchTerms(job.query,job.type,store.featureSettings(job.id).aliases).includes(a));
       if (result.proposedAliases.length) result.message += ' Suggested aliases still require your identity decision; name matches alone do not prove equivalence.';
-    } else if (action.input.operation === 'gap') {
-      result = await investigateGap(store,job,action.input,action.result,async checkpoint=>{
+    } else if (action.input.operation === 'gap' || action.input.operation === 'headwaters') {
+      const save = async checkpoint=>{
         if (getAction(store,action.id)?.status!=='running') throw Error('Investigation cancelled.');
         if (snapshot(store,action.report_id,action.input)!==action.baseline) throw Error('Inputs changed during investigation. Start a new investigation.');
         updateAction(store,action.id,'running',checkpoint);
-      },options);
+      };
+      result = action.input.operation === 'gap' ? await investigateGap(store,job,action.input,action.result,save,options) : await investigateHeadwaters(store,job,action.result,save,options);
     } else if (action.input.operation === 'prerequisite') {
       const terms = featureSearchTerms(action.input.query, 'river');
       const matches = store.jobs().filter(j => !j.superseded_by && j.type === 'river' && terms.includes(j.normalized));
