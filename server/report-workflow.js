@@ -62,6 +62,10 @@ export function workflowView(store, id) {
       if (target) action.outcome = summary(store, target);
     }
     if (action.kind === 'investigate' && action.status === 'ready' && action.baseline !== snapshot(store, id, action.input)) action.stale = true;
+    if(action.input.operation==='gap') {
+      // Keep full query snapshots in SQLite, not in the browser's polling responses.
+      action.result={...action.result,checks:action.result.checks?.map(({records,...check})=>check),routes:action.result.routes?.map(({geometry,...route})=>route)};
+    }
     return action;
   });
   return { report, job: summary(store, job), state: flow.state, reason: flow.reason, readOnlyReason, actions,

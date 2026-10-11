@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../server/store.js';
 import { queueInvestigation,runInvestigation,workflowView,applyInvestigation,changeReportState } from '../server/report-workflow.js';
-import { checkGapLayer,assessGap,gapAnchor } from '../server/gap-investigation.js';
+import { checkGapLayer,assessGap,gapAnchor,gapVersion } from '../server/gap-investigation.js';
 import { createWorker } from '../server/worker.js';
 
 const source={name:'Channels',type:'river',format:'arcgis',url:'https://example.org/FeatureServer/1',nameField:'name',idField:'id',licence:'Fixture',attribution:'Fixture',version:'1',completeness:'partial',aliases:[],notes:''};
@@ -70,7 +70,7 @@ test('restart resumes completed source checks without fetching them again',async
   const f=fixture();let worker;try{
     const a=queue(f),anchor=gapAnchor(f.store,f.job),s=f.store.sources().find(s=>s.id===f.channelId);
     const checked=await checkGapLayer(s,{targetName:'Lake Test',radiusKm:10},anchor,loader());
-    f.store.db.prepare('UPDATE report_actions SET status=?,result=? WHERE id=?').run('running',JSON.stringify({version:'terminal-gap/1',anchor,checks:[checked],discovered:[],serviceChecks:[],research:null}),a.id);
+    f.store.db.prepare('UPDATE report_actions SET status=?,result=? WHERE id=?').run('running',JSON.stringify({version:gapVersion,anchor,checks:[checked],discovered:[],serviceChecks:[],research:null}),a.id);
     const load=loader();worker=createWorker(f.store,{investigationLoader:async url=>{assert.ok(!url.includes('/1'),'completed source re-fetched');return load(url);}});
     await worker.tick();assert.equal(workflowView(f.store,f.reportId).actions[0].status,'ready');
   }finally{worker?.stop();f.store.close();}
@@ -85,7 +85,7 @@ test('cancellation and changed geometry prevent publishing or applying findings'
 test('partial spatial results, wrong object IDs and invalid geometry are rejected',async()=>{
   const f=fixture();try{
     const s=f.store.sources().find(s=>s.id===f.channelId),anchor=gapAnchor(f.store,f.job),load=loader([channel]);
-    await assert.rejects(()=>checkGapLayer(s,{targetName:'Lake Test',radiusKm:10},anchor,async url=>url.includes('returnIdsOnly')?{objectIds:[1],exceededTransferLimit:true}:load(url)),/Incomplete/);
+    await assert.rejects(()=>checkGapLayer(s,{targetName:'Lake Test',radiusKm:10},anchor,async url=>url.includes('returnIdsOnly')?{objectIds:[1],exceededTransferLimit:true}:load(url)),/incomplete|85 queries/);
     await assert.rejects(()=>checkGapLayer(s,{targetName:'Lake Test',radiusKm:10},anchor,async url=>url.includes('objectIds=')?{features:[{...channel,properties:{id:3}}]}:load(url)),/requested IDs/);
     assert.throws(()=>queueInvestigation(f.store,f.reportId,{operation:'gap',targetName:'Lake Test',radiusKm:99}));
     assert.throws(()=>queueInvestigation(f.store,f.reportId,{operation:'retry',targetName:'Lake Test'}));
@@ -116,5 +116,57 @@ test('multiple distinct destination polygons cannot choose an estimated anchor a
     const second={...polygon,properties:{id:3,name:'Lake Test'},geometry:{type:'Polygon',coordinates:[[[144.04,-37.01],[144.05,-37.01],[144.05,-36.99],[144.04,-36.99],[144.04,-37.01]]]}};
     const result=assessGap([{source:s,status:'checked',kind:'waterbody',requests:['https://example.org/query'],records:[polygon,second]}],anchor,{targetName:'Lake Test',radiusKm:10});
     assert.equal(result.targets.length,2);assert.equal(result.estimate,undefined);
+  }finally{f.store.close();}
+});
+test('large spatial queries subdivide the full envelope and deduplicate boundary IDs',async()=>{
+  const f=fixture();try{
+    const s=f.store.sources().find(s=>s.id===f.channelId),anchor=gapAnchor(f.store,f.job),baseLoad=loader();let cells=0;
+    const all=Array.from({length:1001},(_,i)=>i+1);
+    const load=async url=>{
+      const u=new URL(url);
+      if(u.searchParams.has('returnIdsOnly')) {
+        const n=cells++;return {objectIds:n===0?all:n===1?all.slice(0,300):n===2?all.slice(299,600):n===3?all.slice(599,900):all.slice(899)};
+      }
+      if(u.searchParams.has('objectIds'))return {features:u.searchParams.get('objectIds').split(',').map(id=>({...channel,properties:{id:Number(id),name:'Test River'}}))};
+      return baseLoad(url);
+    };
+    const result=await checkGapLayer(s,{targetName:'Lake Test',radiusKm:10},anchor,load);
+    assert.equal(cells,5);assert.equal(result.total,1001);assert.equal(result.spatialQueries[0].split,true);
+    assert.equal(new Set(result.records.map(f=>f.properties.id)).size,1001);
+  }finally{f.store.close();}
+});
+test('truncated ID responses subdivide, empty ArcGIS null IDs are accepted, and missing child coverage fails',async()=>{
+  const f=fixture();try{
+    const s=f.store.sources().find(s=>s.id===f.channelId),anchor=gapAnchor(f.store,f.job),baseLoad=loader();let cells=0;
+    const load=async url=>url.includes('returnIdsOnly')?(cells++===0?{objectIds:[1],exceededTransferLimit:true}:{objectIds:null,objectIdFieldName:'id'}):baseLoad(url);
+    const result=await checkGapLayer(s,{targetName:'Lake Test',radiusKm:10},anchor,load);assert.equal(result.total,0);assert.equal(cells,5);
+    let n=0;
+    await assert.rejects(()=>checkGapLayer(s,{targetName:'Lake Test',radiusKm:10},anchor,async url=>url.includes('returnIdsOnly')?(n++===0?{objectIds:Array.from({length:1001},(_,i)=>i)}:{objectIds:[]}):baseLoad(url)),/omitted/);
+  }finally{f.store.close();}
+});
+test('approved cross-source channel endpoints produce a candidate with source provenance and shoreline evidence',()=>{
+  const f=fixture();try{
+    const anchor=gapAnchor(f.store,f.job),a=f.store.sources().find(s=>s.id===f.channelId),b={...a,id:'other-source'},water=f.store.sources().find(s=>s.url.endsWith('/2'));
+    const first={...channel,geometry:{type:'LineString',coordinates:[[144,-37],[144.01,-37]]}};
+    const second={...channel,properties:{id:3,name:'Unnamed channel'},geometry:{type:'LineString',coordinates:[[144.0101,-37],[144.025,-37]]}};
+    const checks=[{source:a,status:'checked',kind:'channels',records:[first]},{source:b,status:'checked',kind:'channels',records:[second]},{source:water,status:'checked',kind:'waterbody',requests:['https://example.org/query'],records:[polygon]}];
+    const r=assessGap(checks,anchor,{targetName:'Lake Test',radiusKm:10});
+    assert.equal(r.routes.length,1);assert.equal(r.routes[0].channelSourceIds.length,2);assert.equal(r.routes[0].members.length,2);
+    assert.ok(r.routes[0].joinGapsKm.some(km=>km>0));assert.equal(r.routes[0].shorelineIntersections.length,1);
+    assert.equal(r.endpointAssessment.physicalMouthVerified,false);
+    assert.equal(assessGap(checks.map(c=>c.source.id===b.id?{...c,source:{...b,status:'pending'}}:c),anchor,{targetName:'Lake Test',radiusKm:10}).routes.length,0);
+  }finally{f.store.close();}
+});
+test('waterbody containment explains a wetland terminus without declaring the lake mouth verified',()=>{
+  const f=fixture();try{
+    const anchor=gapAnchor(f.store,f.job),s=f.store.sources().find(s=>s.url.endsWith('/2'));
+    const swamp={...polygon,properties:{id:7,name:' ',kind:5},geometry:{type:'Polygon',coordinates:[[[143.999,-37.001],[144.001,-37.001],[144.001,-36.999],[143.999,-36.999],[143.999,-37.001]]]}};
+    const check={source:s,status:'checked',kind:'waterbody',waterbodyContext:true,classifications:[{field:'kind',values:[{code:5,name:'Swamp'}]}],requests:['https://example.org/query'],records:[swamp,polygon]};
+    const r=assessGap([check],anchor,{targetName:'Lake Test',radiusKm:10});
+    assert.equal(r.endpointAssessment.relation,'within_other_waterbody');assert.equal(r.endpointAssessment.containingWaterbodies[0].classification,'Swamp');assert.ok(r.estimate);assert.equal(r.endpointAssessment.physicalMouthVerified,false);
+    assert.equal(r.endpointAssessment.containingWaterbodies[0].name,'Unnamed waterbody');
+    assert.ok(r.preview.collection.features.some(f=>f.geometry.type==='LineString'&&f.properties.label===r.estimate.label));
+    const inside=assessGap([check],{...anchor,coordinates:[144.025,-37]},{targetName:'Lake Test',radiusKm:10});
+    assert.equal(inside.endpointAssessment.relation,'within_named_destination');assert.equal(inside.estimate,undefined);
   }finally{f.store.close();}
 });
