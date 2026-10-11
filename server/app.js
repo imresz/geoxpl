@@ -11,6 +11,7 @@ import { terrainSchema, demEndpoint } from './terrain.js';
 import { formationJunctionsSchema } from './geofabric.js';
 import { enqueueBatch, listBatches, batchStatus } from './batches.js';
 import { workflowView, queueInvestigation, applyInvestigation, changeReportState, updateRecommendation, recordReportReview } from './report-workflow.js';
+import { sourceChangeTargets } from './source-selection.js';
 
 export function createApp(store, config = {}) {
   const app = express(); app.disable('x-powered-by');
@@ -116,14 +117,19 @@ export function createApp(store, config = {}) {
     if (!validLandformSource(source)) return res.status(400).json({ error: 'Terrain and GMU250 sources require type Valley and their supported official endpoint.' });
     if (newStatus === 'approved' && (!source.licence.trim() || !source.attribution.trim())) return res.status(400).json({ error: 'Verified licence and attribution are required for approval.' });
     if (newStatus === old.status && JSON.stringify(sourceSchema.parse(old)) === JSON.stringify(source)) return res.json({ ok: true, unchanged: true });
-    store.decideSource(old.id, newStatus, source);
-    for (const f of store.features().filter(f => f.evidence.some(e => e.sourceId === old.id))) {
-      const j = store.db.prepare('SELECT job_id FROM features WHERE id=?').get(f.id);
-      store.invalidateFeature(j.job_id, 'Source configuration or approval changed. Reprocessing required.');
-      store.updateJob(j.job_id, 'pending', 'awaiting_review', 'Source approval changed; awaiting reprocessing');
-    }
-    if (newStatus === 'approved') for (const j of store.jobs().filter(j => !j.superseded_by && j.type === source.type && !['importing', 'processing', 'researching', 'queued'].includes(j.phase))) store.retry(j.id);
-    res.json({ ok: true });
+    const targets=sourceChangeTargets(store,old,source,newStatus);
+    store.db.exec('BEGIN IMMEDIATE');
+    try {
+      store.decideSource(old.id, newStatus, source);
+      for (const id of targets.invalidate) {
+        store.invalidateFeature(id, 'Source configuration or approval changed. Reprocessing required.');
+        const job=store.getJob(id);
+        if (!['queued','importing','processing','researching'].includes(job.phase)) store.updateJob(id, 'pending', 'awaiting_review', 'Source approval changed; awaiting reprocessing');
+      }
+      for (const id of targets.retry) store.retry(id);
+      store.db.exec('COMMIT');
+    } catch(error) {store.db.exec('ROLLBACK');throw error;}
+    res.json({ ok: true, queued:targets.retry.length, invalidated:targets.invalidate.length });
   });
   app.post('/api/admin/jobs/:id/retry', (req, res) => {
     const j = store.getJob(req.params.id); if (!j) return res.status(404).json({ error: 'Job not found.' });

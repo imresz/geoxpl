@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { deriveTerrainValley } from './terrain.js';
 import { drainageFingerprint } from './valley-floor.js';
 import { runInvestigation } from './report-workflow.js';
+import { selectSources } from './source-selection.js';
 
 export function createWorker(store, options = {}) {
   const importer = options.importer || importSource, researcher = options.researcher || research;
@@ -14,7 +15,8 @@ export function createWorker(store, options = {}) {
   async function run(job) {
     if (store.getJob(job.id)?.superseded_by) return;
     const settings = store.featureSettings(job.id);
-    const sources = store.sources().filter(s => s.status === 'approved' && s.type === job.type && s.format !== 'ga-dem' && (s.format !== 'vic-gmu250' || settings.valleyFloor?.sourceId === s.id)).sort((a, b) => a.id.localeCompare(b.id));
+    const {selected:sources,duplicates}=selectSources(store,job,settings);
+    for (const duplicate of duplicates) store.event(job.id,'source_duplicate_skipped',`${duplicate.source.name}: equivalent to ${duplicate.selected.name}; using source ${duplicate.selected.id}`);
     const forceResearch = store.setting(`research:${job.id}`) === 'true';
     if (forceResearch) store.setting(`research:${job.id}`, 'false');
     const imports = [], failures = [];
