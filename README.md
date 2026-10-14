@@ -2,7 +2,22 @@
 
 An initial working implementation of [Initial requirement 01092026.txt](docs/Initial%20requirement%2001092026.txt).
 
-GeoXpl opens on a map of southeastern Australia. Enter a feature name, select **River** or **Valley**, and search. Names are case-insensitive. With **River** selected, the trailing word "River" is optional: "Loddon" and "Loddon River" reuse the same request and results. Existing duplicate spellings prefer the request with active geometry, then a resolved result; historical requests and evidence are retained. Distinct same-named rivers still require selection. The catalogue starts empty. Every new request creates a persistent job; the browser waits up to five seconds, then invites the user to return later while work continues. Repeated searches reuse the same job.
+GeoXpl opens on a map of southeastern Australia. Enter a feature name, select **River**, **Valley** or **National Park**, and search. Names are case-insensitive. With **River** selected, the trailing word "River" is optional: "Loddon" and "Loddon River" reuse the same request and results. With **National Park** selected, "National Park" is optional: "Alpine" and "Alpine National Park" reuse the same result. Existing duplicate spellings prefer the request with active geometry, then a resolved result; historical requests and evidence are retained. Distinct same-named features still require selection. A fresh catalogue starts empty until searches or a batch import populate it. Every new request creates a persistent job; the browser waits up to five seconds, then invites the user to return later while work continues. Repeated searches reuse the same job.
+
+## Victorian national parks
+
+National parks use the Australian Government's [CAPAD 2024 polygon service](https://gis.environment.gov.au/gispubmap/rest/services/ogc_services/CAPAD/FeatureServer/0), licensed CC BY 4.0. The adapter imports established Victorian records with `TYPE_ABBR=NP`, `TYPE=National Park` and `NRS_PA=Y`, including coastal land/water parks. Proposed parks, state parks and differently classified reserves are excluded. The current snapshot contains 45 park identities in 46 records. Multiple parcels are grouped by `PA_ID`; multipart geometry and holes are preserved. Overlapping records of the same park are unioned, never replaced with a convex hull or an interpolated boundary. Distinct same-named park IDs remain selection alternatives.
+
+Boundaries represent **30 June 2024**, not a guarantee of today's legal boundary. The map and detail panel show this date and edition; provenance retains source IDs, object IDs, licences, query URLs and checksums. Resolved means the complete published snapshot was imported, not independently surveyed or legally certified. National-park processing never uses AI to invent geometry.
+
+To register the documented source and enqueue all parks, run from the repository directory:
+
+```powershell
+node --env-file-if-exists=.env scripts/import-national-parks.js --approve-source
+node --env-file-if-exists=.env scripts/batch-import.js status capad-2024-victorian-national-parks
+```
+
+Keep the normal GeoXpl server running to process queued parks. The batch and validated shared source snapshot are saved in SQLite; pending work resumes after restart and re-running the same batch does not duplicate catalogue entries. `--approve-source` explicitly approves this documented source only; an existing rejected source is not overridden. For a staged download, use `--download-only runtime/capad-2024-victoria.snapshot.json`, then `--snapshot <path> --approve-source`. A changed service edition fails closed and needs a new reviewed adapter/batch rather than silently relabelling new data as CAPAD 2024.
 
 ## What works
 

@@ -6,6 +6,7 @@ import { isGeofabric, traceGeofabricMatches } from './geofabric.js';
 import { featureSearchTerms } from './store.js';
 import { withInterpolations } from './interpolation.js';
 import { processValleyFloor } from './valley-floor.js';
+import { processNationalParks } from './capad.js';
 
 export const algorithmVersion = 'directed-geofabric/5.1.0';
 const scopeRegions = new WeakMap();
@@ -157,6 +158,7 @@ function processDirectedSource(item, result) {
 }
 
 function sourceMatches(job, item, boundary, settings, context) {
+  if (job.type === 'national_park') return item.source.format === 'capad' ? processNationalParks(item) : [];
   if (item.source.format === 'vic-gmu250') return job.type === 'valley' ? [processValleyFloor(item, boundary, settings, context.drainage)] : [];
   if (job.type === 'river' && isGeofabric(item.source)) {
     const traced = traceGeofabricMatches(item, boundary, featureSearchTerms(job.query, job.type, settings.aliases), settings);
@@ -194,7 +196,7 @@ function labelMatches(job, results, boundary) {
     const location = regionMiddle === null ? `Near ${position}` : `${lon < regionMiddle ? 'Western' : 'Eastern'} Victoria`;
     const receiving = result.mouth?.receivingRiver;
     const locationLabel = receiving ? `${location}; joins ${receiving}` : location;
-    return { ...result, locationLabel, locationDescription: `Extent centred near ${position}`, displayName: results.length > 1 ? `${job.query} (${locationLabel})` : job.query };
+    return { ...result, locationLabel, locationDescription: `Extent centred near ${position}`, displayName: results.length > 1 ? `${result.displayName||job.query} (${locationLabel})` : result.displayName||job.query };
   }).map((result, _, labelled) => labelled.filter(other => other.displayName === result.displayName).length > 1
     ? { ...result, displayName: `${result.displayName} - ${result.locationDescription} [${result.identityKey.split(':').at(-1)}]` } : result);
 }
@@ -218,7 +220,7 @@ export function processGeometry(job, imports, boundary, settings = {}, context =
   };
   const results = labelMatches(job, chosen.matches.map(candidate => {
     const selected = { ...candidate.result, selection: { sourceId: chosen.sourceId, mode: settings.preferredSourceId ? 'administrator' : multiple ? 'identity_evidence_then_resolution_and_coverage' : 'resolution_then_identity_and_endpoints_then_coverage', comparisons } };
-    return withInterpolations(selected, imports.find(i => i.source.id === chosen.sourceId), settings);
+    return job.type === 'national_park' ? selected : withInterpolations(selected, imports.find(i => i.source.id === chosen.sourceId), settings);
   }), boundary);
   const status = results.every(r => r.status === 'resolved') ? 'resolved' : 'partially_resolved';
   return { status, message: results.length > 1 ? `${results.length} same-named features found. Choose a location.` : status === 'resolved' ? 'Feature ready' : 'Available geometry needs review before it can be shown as the complete feature.', result: results.length === 1 ? results[0] : null, results, comparisons };

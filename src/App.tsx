@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Compass, Search, ArrowUpRight, Waves, Mountain, Database, LoaderCircle, ArrowLeft, Check, Clock3, ShieldCheck, X, Info } from 'lucide-react';
+import { Compass, Search, ArrowUpRight, Waves, Mountain, Trees, Database, LoaderCircle, ArrowLeft, Check, Clock3, ShieldCheck, X, Info } from 'lucide-react';
 import { MapView } from './MapView';
 import { api, statusLabel, featureLabel, type Job, type Feature, type FeatureSummary, type Interpolation } from './api';
 import { Admin } from './Admin';
 import './catalogue.css';
 
 export function Brand() { return <a className="brand" href="/"><span className="brand-symbol"><Compass size={23}/></span><span>Geo<span className="brand-accent">Xpl</span></span></a>; }
+const FeatureIcon = ({type}:{type:string}) => type==='river'?<Waves size={20}/>:type==='national_park'?<Trees size={20}/>:<Mountain size={20}/>;
 export function App() {
   const [query, setQuery] = useState(''), [type, setType] = useState(''), [job, setJob] = useState<Job | null>(null), [waiting, setWaiting] = useState(false), [error, setError] = useState('');
   const [selected, setSelected] = useState<Feature | null>(null), [tab, setTab] = useState('explore'), [catalogue, setCatalogue] = useState<FeatureSummary[]>([]), [elapsed, setElapsed] = useState(0);
   const [loadingFeature, setLoadingFeature] = useState<string | null>(null);
+  const [catalogueType,setCatalogueType]=useState('all');
+  const visibleCatalogue=catalogue.filter(f=>catalogueType==='all'||f.type===catalogueType);
   const active = useRef<AbortController | null>(null);
   const panel = useRef<HTMLElement | null>(null);
   useEffect(() => { panel.current?.scrollTo({ top: 0 }); }, [selected?.id, job?.id, job?.selectionRequired, tab]);
@@ -66,24 +69,24 @@ export function App() {
     <header className="topbar"><Brand/><nav aria-label="Main navigation"><button className={tab === 'explore' ? 'nav-active' : ''} onClick={() => setTab('explore')}>Explore</button><button className={tab === 'catalogue' ? 'nav-active' : ''} onClick={() => { setTab('catalogue'); refreshCatalogue(); }}>Catalogue <span className="nav-count">{catalogue.length}</span></button></nav><a className="admin-link" href="/admin"><ShieldCheck size={16}/><span>Administration</span><ArrowUpRight size={14}/></a></header>
     <form className="search-bar" onSubmit={search}>
       <label className="query-field"><Search size={20}/><input aria-label="Feature name" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search a geographical feature" autoComplete="off" required minLength={2} maxLength={150}/>{query && <button type="button" className="clear-query" aria-label="Clear search" onClick={() => setQuery('')}><X size={16}/></button>}</label>
-      <select aria-label="Feature type" required value={type} onChange={e => setType(e.target.value)}><option value="" disabled>Feature type</option><option value="river">River</option><option value="valley">Valley</option></select>
+      <select aria-label="Feature type" required value={type} onChange={e => setType(e.target.value)}><option value="" disabled>Feature type</option><option value="river">River</option><option value="valley">Valley</option><option value="national_park">National Park</option></select>
       <button className="primary search-submit" type="submit" disabled={waiting || !query.trim() || !type}>{waiting ? <LoaderCircle className="spin" size={18}/> : <Search size={18}/>}<span>{waiting ? 'Processing' : 'Search'}</span></button>
     </form>
     <main className="explorer">
       <aside className="feature-panel" ref={panel}>
         <div className="panel-kicker"><span className="live-dot"/>VICTORIA & BEYOND</div>
         {error && <p className="error" role="alert">{error}</p>}
-        {tab === 'catalogue' ? <><div className="panel-title"><h1>Feature catalogue</h1><Database size={20}/></div><p className="muted small">{catalogue.length} saved {catalogue.length === 1 ? 'feature' : 'features'}</p>
+        {tab === 'catalogue' ? <><div className="panel-title"><h1>Feature catalogue</h1><Database size={20}/></div><p className="muted small">{catalogue.length} saved {catalogue.length === 1 ? 'feature' : 'features'}</p><select aria-label="Catalogue feature type" value={catalogueType} onChange={e=>setCatalogueType(e.target.value)}><option value="all">All feature types</option><option value="river">Rivers</option><option value="valley">Valleys</option><option value="national_park">National parks</option></select>
           {catalogue.length ? [{status:'resolved',title:'Resolved'},{status:'partially_resolved',title:'Partially resolved'}].map(group => {
-            const features = catalogue.filter(f => f.status === group.status).sort((a,b) => featureLabel(a).localeCompare(featureLabel(b)));
+            const features = visibleCatalogue.filter(f => f.status === group.status).sort((a,b) => featureLabel(a).localeCompare(featureLabel(b)));
             return <section className="catalogue-group" key={group.status} aria-label={`${group.title} features`}><h2>{group.title}<span className={`badge ${group.status === 'resolved' ? 'green' : 'amber'}`}>{features.length}</span></h2>
-              <div className="catalogue-list">{features.map(f => <button key={f.id} disabled={!!loadingFeature} onClick={() => selectFeature(f.id, true)}>{f.type === 'river' ? <Waves size={20}/> : <Mountain size={20}/>}<span><strong>{featureLabel(f)}</strong><small>{f.type} · {f.lengthKm != null ? `${f.lengthKm.toFixed(1)} km` : f.areaKm2 != null ? `${f.areaKm2.toFixed(1)} km²${f.extentEstimate ? ' estimated' : ''}` : 'Measurement unavailable'}</small>{f.extentEstimate && <small>{f.extentEstimate.label}</small>}</span>{loadingFeature === f.id ? <LoaderCircle className="spin" size={16}/> : <ArrowUpRight size={16}/>}</button>)}</div>
+              <div className="catalogue-list">{features.map(f => <button key={f.id} disabled={!!loadingFeature} onClick={() => selectFeature(f.id, true)}><FeatureIcon type={f.type}/><span><strong>{featureLabel(f)}</strong><small>{statusLabel(f.type)} · {f.lengthKm != null ? `${f.lengthKm.toFixed(1)} km` : f.areaKm2 != null ? `${f.areaKm2.toFixed(1)} km²${f.extentEstimate ? ' estimated' : ''}` : 'Measurement unavailable'}</small>{f.extentEstimate && <small>{f.extentEstimate.label}</small>}</span>{loadingFeature === f.id ? <LoaderCircle className="spin" size={16}/> : <ArrowUpRight size={16}/>}</button>)}</div>
               {!features.length && <p className="muted small">No {group.title.toLowerCase()} features yet.</p>}
             </section>;
           }) : <div className="empty-state"><Database size={30}/><h2>No processed features yet</h2><p>Saved features will appear here.</p></div>}
         </> : selected ? <>
           <button className="text-button back" onClick={() => { setSelected(null); if (!job?.selectionRequired) setJob(null); }}><ArrowLeft size={15}/>{job?.selectionRequired ? 'Matching features' : 'Overview'}</button>
-          <div className="feature-type">{selected.type === 'river' ? <Waves size={17}/> : <Mountain size={17}/>} {selected.type}</div>
+          <div className="feature-type"><FeatureIcon type={selected.type}/> {statusLabel(selected.type)}</div>
           <h1 className="feature-name">{featureLabel(selected)}</h1><span className={`badge ${selected.status === 'resolved' ? 'green' : 'amber'}`}>{statusLabel(selected.status)}</span>
           {selected.recordedNetwork && <div className="geometry-modes" role="group" aria-label="River geometry"><button aria-pressed={!showNetwork} onClick={() => setShowNetwork(false)}>Main-stem candidate</button><button aria-pressed={showNetwork} onClick={() => setShowNetwork(true)}>Named network</button></div>}
           {selected.valleyFloor && <div className="geometry-modes" role="group" aria-label="Valley geometry"><button aria-pressed={!showFloor} onClick={() => setShowFloor(false)}>Terrain extent</button><button aria-pressed={showFloor} onClick={() => setShowFloor(true)}>Valley floor</button></div>}
@@ -91,6 +94,7 @@ export function App() {
           <div className="measure"><strong>{(showNetwork ? selected.recordedNetwork?.lengthKm : selected.lengthKm)?.toFixed(1) || displayedFeature?.areaKm2?.toFixed(1)}</strong><span>{selected.type === 'river' ? selected.method === 'geofabric_directed_main_stem' ? 'km of BoM modelled flow path' : selected.mainStem?.status === 'candidate' && !showNetwork ? 'km of unverified candidate' : 'km of recorded watercourse' : selected.extentEstimate ? displayedFeature?.extentEstimate?.kind === 'terrain_valley' ? 'km² estimated valley extent' : 'km² estimated valley floor' : 'km² recorded extent'}</span></div>
           {displayedFeature?.extentEstimate && <p className="muted small">{displayedFeature.extentEstimate.sourceScale}</p>}
           {selected.mainStem?.limitations && <details className="candidate-limits"><summary>{selected.mainStem.status === 'candidate' ? 'Candidate limitations' : 'Dataset limitations'}</summary>{selected.mainStem.limitations.map((text, i) => <p className="muted small" key={i}>{text}</p>)}</details>}
+          {selected.park&&<div className="detail-section"><h2>Published park boundary</h2><dl><dt>Edition</dt><dd>{selected.park.edition}</dd><dt>Boundary snapshot</dt><dd>{selected.park.boundaryDate}</dd><dt>Park identifier</dt><dd>{selected.park.paId}</dd><dt>Classification</dt><dd>{selected.park.designation}</dd></dl>{selected.park.limitations.map((text,i)=><p className="muted small" key={i}>{text}</p>)}</div>}
           {!!selected.interpolations?.features.length && !showNetwork && <div className="detail-section estimated-connections"><h2>Interpolated connections</h2><p className="muted small">Approximate paths. Excluded from recorded measurements.</p>{selected.interpolations.features.some(f => f.properties.alternativeGroup) && <p className="muted small">Upstream alternatives are possibilities, not a chosen route.</p>}{selected.interpolations.features.map(gap => <button key={gap.properties.id} className="estimate-focus" title={`Show ${gap.properties.label} on map`} onClick={() => setFocusedEstimate({ ...gap })}><span className="legend-interpolated"/><span>{gap.properties.label}<small>{gap.properties.lengthKm.toFixed(2)} km estimated</small></span><ArrowUpRight size={15}/></button>)}</div>}
           {selected.interpolationSummary?.notes.map((note, i) => <p key={`interpolation-${i}`} className="warning"><Info size={15}/>{note}</p>)}
           {(selected.source || selected.mouth) && <div className="detail-section"><h2>Network endpoints</h2>{[selected.source, selected.mouth].filter(Boolean).map(endpoint => endpoint && <div className="network-endpoint" key={endpoint.nodeId}><span className={`endpoint-dot ${endpoint === selected.mouth ? 'outlet' : ''}`}/><span><strong>{endpoint.classification}</strong>{endpoint.receivingRiver && <small>{endpoint.joiningRiver ? `Forms ${endpoint.receivingRiver} with ${endpoint.joiningRiver}` : `Joins ${endpoint.receivingRiver}`}</small>}<small>{endpoint.coordinates[1].toFixed(5)}, {endpoint.coordinates[0].toFixed(5)}</small>{endpoint.namingEvidenceUrl && <a className="source-link" href={endpoint.namingEvidenceUrl} target="_blank" rel="noreferrer">Naming evidence<ArrowUpRight size={14}/></a>}</span></div>)}</div>}
@@ -99,7 +103,7 @@ export function App() {
         </> : job?.selectionRequired && !waiting ? <section className="matching-features" aria-label="Matching features">
           <div className="panel-title"><h1>{job.query}</h1></div>
           <p className="muted small" role="status">{job.matches.length} matching features. Choose a location.</p>
-          <div className="catalogue-list">{job.matches.map(f => <button key={f.id} disabled={!!loadingFeature} onClick={() => selectFeature(f.id)}>{f.type === 'river' ? <Waves size={20}/> : <Mountain size={20}/>}<span><strong>{featureLabel(f)}</strong><small>{f.locationDescription}</small><small>{f.lengthKm != null ? `${f.lengthKm.toFixed(1)} km recorded` : `${f.areaKm2?.toFixed(1)} km² recorded`}</small><span className={`badge ${f.status === 'resolved' ? 'green' : 'amber'}`}>{statusLabel(f.status)}</span></span>{loadingFeature === f.id ? <LoaderCircle className="spin" size={16}/> : <ArrowUpRight size={16}/>}</button>)}</div>
+          <div className="catalogue-list">{job.matches.map(f => <button key={f.id} disabled={!!loadingFeature} onClick={() => selectFeature(f.id)}><FeatureIcon type={f.type}/><span><strong>{featureLabel(f)}</strong><small>{f.locationDescription}</small><small>{f.lengthKm != null ? `${f.lengthKm.toFixed(1)} km recorded` : `${f.areaKm2?.toFixed(1)} km² recorded`}</small><span className={`badge ${f.status === 'resolved' ? 'green' : 'amber'}`}>{statusLabel(f.status)}</span></span>{loadingFeature === f.id ? <LoaderCircle className="spin" size={16}/> : <ArrowUpRight size={16}/>}</button>)}</div>
         </section> : <>
           <div className="panel-title"><h1>Explore geography</h1><Compass size={21}/></div><p className="muted">Rivers and valleys, in their full context.</p>
           {(waiting || job) && <div className="search-result" role="status" aria-live="polite">

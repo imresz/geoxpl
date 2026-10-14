@@ -7,6 +7,7 @@ export const normalize = value => value.normalize('NFKC').trim().replace(/\s+/g,
 export function featureSearchTerms(query, type, aliases = []) {
   const name = normalize(query || '');
   const base = type === 'river' && name !== 'river' ? name.replace(/ river$/, '') : '';
+  if(type==='national_park') {const park=name.replace(/ national park$/,'');return [...new Set([park,`${park} national park`,...aliases.map(normalize)].filter(Boolean))];}
   return [...new Set([...(base ? [`${base} river`, base] : [name]), ...aliases.map(normalize)].filter(Boolean))];
 }
 export const now = () => new Date().toISOString();

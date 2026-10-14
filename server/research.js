@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { publicJson } from './network.js';
+import { capadSource } from './capad.js';
 
 export const sourceSchema = z.object({
-  name: z.string().trim().min(2).max(200), type: z.enum(['river', 'valley']),
-  format: z.enum(['arcgis', 'geojson', 'vic-gmu250', 'ga-dem']), url: z.url().startsWith('https://'),
+  name: z.string().trim().min(2).max(200), type: z.enum(['river', 'valley', 'national_park']),
+  format: z.enum(['arcgis', 'geojson', 'vic-gmu250', 'ga-dem', 'capad']), url: z.url().startsWith('https://'),
   nameField: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), idField: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
   licence: z.string().max(500), attribution: z.string().max(500), version: z.string().max(200),
   completeness: z.enum(['unknown', 'partial', 'complete']), aliases: z.array(z.string().max(150)).max(20),
@@ -19,6 +20,7 @@ const reportJsonSchema = z.toJSONSchema(reportSchema, {
 export const aiConfigured = () => !!(process.env.OPENAI_API_KEY && process.env.OPENAI_MODEL);
 
 export async function research(job, store, reason, diagnostics = {}) {
+  if(job.type==='national_park')return {provider:'official CAPAD catalogue',summary:`${reason} National parks require a validated published boundary, not AI-generated geometry.`,nextSteps:['Check the approved CAPAD source and complete snapshot.','Review the official park name, legal classification and CAPAD edition; no boundary interpolation is permitted.'],evidence:[{title:'CAPAD 2024',url:'https://www.dcceew.gov.au/environment/land/nrs/science/capad/2024'}],candidates:[capadSource]};
   if (!aiConfigured()) {
     const candidates = [], evidence = [];
     if (job.type === 'river') {

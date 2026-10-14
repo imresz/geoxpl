@@ -23,7 +23,12 @@ export function createWorker(store, options = {}) {
     store.updateJob(job.id, 'pending', 'importing', 'Checking approved geographic sources');
     for (const source of sources) {
       try {
-        const imported = await importer(source, job.query, undefined, settings, { progress: message => store.updateJob(job.id, 'pending', 'importing', message) });
+        let capadSnapshot;
+        if(source.format==='capad') {
+          const snapshot=store.db.prepare("SELECT payload,metadata,checksum FROM imports WHERE source_id=? AND job_id='capad-victoria-2024' ORDER BY created DESC,rowid DESC LIMIT 1").get(source.id);
+          if(snapshot)capadSnapshot={payload:JSON.parse(snapshot.payload),metadata:JSON.parse(snapshot.metadata),checksum:snapshot.checksum,truncated:false};
+        }
+        const imported = await importer(source, job.query, undefined, settings, { capadSnapshot, progress: message => store.updateJob(job.id, 'pending', 'importing', message) });
         const id = store.addImport(source.id, job.id, imported.checksum, imported.payload, { ...imported.metadata, truncated: imported.truncated });
         imports.push({ ...imported, source, id });
         store.event(job.id, 'imported', `${source.name}: ${imported.payload.features.length} records`);
