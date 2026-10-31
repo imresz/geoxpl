@@ -2,7 +2,23 @@
 
 An initial working implementation of [Initial requirement 01092026.txt](docs/Initial%20requirement%2001092026.txt).
 
-GeoXpl opens on a map of southeastern Australia. Enter a feature name, select **River**, **Valley** or **National Park**, and search. Names are case-insensitive. With **River** selected, the trailing word "River" is optional: "Loddon" and "Loddon River" reuse the same request and results. With **National Park** selected, "National Park" is optional: "Alpine" and "Alpine National Park" reuse the same result. Existing duplicate spellings prefer the request with active geometry, then a resolved result; historical requests and evidence are retained. Distinct same-named features still require selection. A fresh catalogue starts empty until searches or a batch import populate it. Every new request creates a persistent job; the browser waits up to five seconds, then invites the user to return later while work continues. Repeated searches reuse the same job.
+GeoXpl opens on a map of southeastern Australia. Enter a feature name, select **River**, **Valley**, **National Park** or **State Forest**, and search. Names are case-insensitive. With **River** selected, the trailing word "River" is optional: "Loddon" and "Loddon River" reuse the same request and results. With **National Park** selected, "National Park" is optional: "Alpine" and "Alpine National Park" reuse the same result. Existing duplicate spellings prefer the request with active geometry, then a resolved result; historical requests and evidence are retained. Distinct same-named features still require selection. A fresh catalogue starts empty until searches or a batch import populate it. Every new request creates a persistent job; the browser waits up to five seconds, then invites the user to return later while work continues. Repeated searches reuse the same job.
+
+## Victorian state forests
+
+Select **State Forest** to search named Victorian state forests. The trailing words "State Forest" are optional and names are case-insensitive. Results are saved in the normal catalogue, which now has a State forests filter. Forests are processed on demand; this does not bulk-import every forest in Victoria.
+
+The `vic-state-forest` adapter uses the official [Public Land Management (PLM25)](https://discover.data.vic.gov.au/dataset/public-land-management-plm25) WFS layer `open-data-platform:plm25` at `https://opendata.maps.vic.gov.au/geoserver/wfs`, licensed CC BY 4.0. It requires both current management fields `mmgt_ongen` and `mmtgen` to equal `STATE FOREST` and matches the published `name` exactly. Proposed classifications, national parks, plantations and unnamed land are not substituted. The 1:25,000 polygons are grouped by published name (PLM25 has no persistent parent forest ID), unioned without inventing connections, and retain holes and disconnected parts. The result describes all matching published parcels, not an independently verified legal or ecological forest boundary or public-access entitlement. Parcel version dates are shown separately from retrieval time.
+
+Pagination is ordered by `plm_id`, checked against `numberMatched` and `numberReturned`, and rejects repeated IDs, changing counts, missing records and wrong coordinate systems. Imports are bounded to 10,000 records and two million vertices per feature. Exact query URLs, source parcel IDs, licences and checksums remain in the import/evidence history. No AI is used to manufacture or research substitute boundaries.
+
+Register the documented official source and optionally process a first forest:
+
+```powershell
+node --env-file-if-exists=.env scripts/register-state-forests.js --approve-source --seed "Marysville State Forest"
+```
+
+The normal running server handles the queued job and resumes interrupted processing after a restart. The command never overrides a rejected source. Other named forests are added when searched.
 
 ## Victorian national parks
 
