@@ -108,9 +108,9 @@ export function App() {
         </section> : <>
           <div className="panel-title"><h1>Explore geography</h1><Compass size={21}/></div><p className="muted">Rivers and valleys, in their full context.</p>
           {(waiting || job) && <div className="search-result" role="status" aria-live="polite">
-            <div className="result-symbol">{waiting ? <LoaderCircle className="spin" size={24}/> : job?.status === 'resolved' ? <Check size={24}/> : <Clock3 size={24}/>}</div>
-            <h2>{job?.query || query}</h2><span className="feature-type">{job?.type || type}</span>
-            <h3>{waiting ? 'Preparing your feature' : job?.status === 'resolved' ? 'Feature ready' : job?.status === 'failed' ? 'Processing interrupted' : job?.phase === 'awaiting_data' ? 'Needs geographic evidence' : job?.phase === 'awaiting_review' ? 'Awaiting review' : 'Processing continues'}</h3>
+            <div className="result-symbol">{waiting ? <LoaderCircle className="spin" size={24}/> : job?.status === 'resolved' ? <Check size={24}/> : job&&['no_match','wrong_feature_type','import_failed','source_unavailable'].includes(job.status)?<Info size={24}/>:<Clock3 size={24}/>}</div>
+            <h2>{job?.query || query}</h2><span className="feature-type">{statusLabel(job?.type || type)}</span>
+            <h3>{waiting ? 'Preparing your feature' : job&&['no_match','wrong_feature_type','import_failed','source_unavailable'].includes(job.status)?statusLabel(job.status):job?.status === 'resolved' ? 'Feature ready' : job?.status === 'failed' ? 'Processing interrupted' : job?.phase === 'awaiting_data' ? 'Needs geographic evidence' : job?.phase === 'awaiting_review' ? 'Awaiting review' : 'Processing continues'}</h3>
             <p>{waiting ? 'Checking sources and assembling the geometry.' : job?.status === 'pending' ? 'Please try this search again later. Your request is saved.' : job?.message || 'Your request is being processed.'}</p>
             {waiting && <div className="progress-track"><span style={{ width: `${elapsed / 5 * 100}%` }}/></div>}
             {!waiting && job && <><span className="badge">{statusLabel(job.phase)}</span><button className="secondary full" onClick={() => search(undefined, { query: job.query, type: job.type })}>Check again</button></>}
