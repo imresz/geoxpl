@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 export const normalize = value => value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-AU');
 export function featureSearchTerms(query, type, aliases = []) {
   const name = normalize(query || '');
+  if(type==='state_park') {const base=name.replace(/ state park$/,'');return [...new Set([base,`${base} state park`,...aliases.map(normalize)].filter(Boolean))];}
   if(type==='state_forest') {const base=name.replace(/ state forest$/,'');return [...new Set([base,`${base} state forest`,...aliases.map(normalize)].filter(Boolean))];}
   const base = type === 'river' && name !== 'river' ? name.replace(/ river$/, '') : '';
   if(type==='national_park') {const park=name.replace(/ national park$/,'');return [...new Set([park,`${park} national park`,...aliases.map(normalize)].filter(Boolean))];}

@@ -13,6 +13,7 @@ export function createWorker(store, options = {}) {
   store.db.prepare("UPDATE jobs SET phase='queued',message='Resuming interrupted processing' WHERE status='pending' AND phase IN ('importing','processing','researching')").run();
   store.db.prepare("UPDATE report_actions SET status='queued' WHERE kind='investigate' AND status='running'").run();
   async function run(job) {
+    const plmJob=['state_forest','state_park'].includes(job.type),plmTitle=job.type==='state_park'?'State Park':'State Forest',plmSlug=job.type==='state_park'?'state-park':'state-forest';
     if (store.getJob(job.id)?.superseded_by) return;
     const settings = store.featureSettings(job.id);
     const {selected:sources,duplicates}=selectSources(store,job,settings);
@@ -45,7 +46,7 @@ export function createWorker(store, options = {}) {
     store.updateJob(job.id, 'pending', 'processing', 'Assembling and validating geometry');
     let output;
     try {output = processGeometry(job, imports, options.boundary || null, settings, { drainage: settings.valleyFloor && store.feature(settings.valleyFloor.drainageFeatureId) });}
-    catch(error){if(job.type!=='state_forest')throw error;output={status:'import_failed',message:`State Forest boundary validation failed: ${String(error.message).slice(0,500)}`,comparisons:[]};}
+    catch(error){if(!plmJob)throw error;output={status:'import_failed',message:`${plmTitle} boundary validation failed: ${String(error.message).slice(0,500)}`,comparisons:[]};}
     const results = output.results || [];
     if (settings.terrain && output.result?.extentEstimate?.kind === 'valley_floor') {
       const floor = output.result;
@@ -84,20 +85,20 @@ export function createWorker(store, options = {}) {
       return store.updateJob(job.id, output.status, output.status === 'resolved' ? 'completed' : 'awaiting_data', `${output.message}${output.status === 'resolved' ? '' : ' Some extents remain partial; each result shows its own evidence and estimates.'}`);
     }
     if (output.status === 'resolved') return store.updateJob(job.id, 'resolved', 'completed', 'Feature ready', featureId);
-    if(job.type==='state_forest'&&!results.length){
+    if(plmJob&&!results.length){
       const checked=imports.filter(i=>i.metadata?.noMatch&&(!settings.preferredSourceId||i.source.id===settings.preferredSourceId));
       let diagnosis=checked[0]?.metadata.noMatch;
       if(output.status==='import_failed')diagnosis={code:'import_failed',message:output.message};
       if(!diagnosis){
         const error=importErrors.find(e=>e.code==='import_failed')||importErrors[0];
-        diagnosis=error?{code:error.code,message:error.code==='source_unavailable'?'The PLM25 source could not be reached. This is a connection problem, not evidence that the forest boundary is missing. An administrator can retry after the connection recovers.':`PLM25 import validation failed: ${error.message}`}:
-          {code:'source_unavailable',message:'No approved, usable PLM25 state-forest source is available. Review the source configuration.'};
+        diagnosis=error?{code:error.code,message:error.code==='source_unavailable'?`The PLM25 source could not be reached. This is a connection problem, not evidence that the ${plmTitle.toLowerCase()} boundary is missing. An administrator can retry after the connection recovers.`:`PLM25 import validation failed: ${error.message}`}:
+          {code:'source_unavailable',message:`No approved, usable PLM25 ${plmSlug} source is available. Review the source configuration.`};
       }
-      const fingerprint=createHash('sha256').update(JSON.stringify({type:'forest-diagnostics/2',settings,diagnosis,failures,imports:imports.map(i=>i.checksum)})).digest('hex');
+      const fingerprint=createHash('sha256').update(JSON.stringify({type:job.type==='state_park'?'state-park-diagnostics/1':'forest-diagnostics/2',settings,diagnosis,failures,imports:imports.map(i=>i.checksum)})).digest('hex');
       const latest=store.reports().find(r=>r.job_id===job.id);
-      const diagnostics={settings,status:diagnosis.code,forestDiagnosis:diagnosis,importFailures:failures,imports:imports.map(i=>({sourceId:i.source.id,checksum:i.checksum,metadata:i.metadata}))};
-      if(latest?.data.fingerprint!==fingerprint)store.report(job.id,{provider:'state forest diagnostics',summary:diagnosis.message,fingerprint,diagnostics,candidates:[],candidateIds:[],evidence:sources.map(s=>({title:s.name,url:s.url})),nextSteps:[diagnosis.code==='source_unavailable'?'Retry after checking the source connection and approval.':diagnosis.code==='import_failed'?'Review the import validation details; do not treat this as missing geographic data.':'Check the published name, display label and feature classification. Related names are suggestions, not automatic replacements.']});
-      store.event(job.id,'forest_diagnosis',JSON.stringify(diagnosis));
+      const diagnostics={settings,status:diagnosis.code,[job.type==='state_park'?'stateParkDiagnosis':'forestDiagnosis']:diagnosis,importFailures:failures,imports:imports.map(i=>({sourceId:i.source.id,checksum:i.checksum,metadata:i.metadata}))};
+      if(latest?.data.fingerprint!==fingerprint)store.report(job.id,{provider:job.type==='state_park'?'state park diagnostics':'state forest diagnostics',summary:diagnosis.message,fingerprint,diagnostics,candidates:[],candidateIds:[],evidence:sources.map(s=>({title:s.name,url:s.url})),nextSteps:[diagnosis.code==='source_unavailable'?'Retry after checking the source connection and approval.':diagnosis.code==='import_failed'?'Review the import validation details; do not treat this as missing geographic data.':'Check the published name, display label and feature classification. Related names are suggestions, not automatic replacements.']});
+      store.event(job.id,job.type==='state_park'?'state_park_diagnosis':'forest_diagnosis',JSON.stringify(diagnosis));
       return store.updateJob(job.id,diagnosis.code,diagnosis.code,diagnosis.message);
     }
     if (output.result?.extentEstimate && !forceResearch) {

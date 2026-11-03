@@ -5,9 +5,11 @@ import { extendGeofabric, isGeofabric } from './geofabric.js';
 import { importValleyLandforms } from './valley-floor.js';
 import { importNationalParks } from './capad.js';
 import { importStateForest } from './state-forests.js';
+import { importStatePark } from './state-parks.js';
 
 export async function importSource(source, query, load = publicJson, identity = {}, context = {}) {
   if (source.status !== 'approved') throw new Error('Source is not approved.');
+  if (source.format === 'vic-state-park') return importStatePark(source,query,load,identity);
   if (source.format === 'vic-state-forest') return importStateForest(source,query,load,identity);
   if (source.format === 'capad') return importNationalParks(source,query,load,identity,context.capadSnapshot);
   if (source.format === 'vic-gmu250') return importValleyLandforms(source, identity, load);

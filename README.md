@@ -2,7 +2,23 @@
 
 An initial working implementation of [Initial requirement 01092026.txt](docs/Initial%20requirement%2001092026.txt).
 
-GeoXpl opens on a map of southeastern Australia. Enter a feature name, select **River**, **Valley**, **National Park** or **State Forest**, and search. Names are case-insensitive. With **River** selected, the trailing word "River" is optional: "Loddon" and "Loddon River" reuse the same request and results. With **National Park** selected, "National Park" is optional: "Alpine" and "Alpine National Park" reuse the same result. Existing duplicate spellings prefer the request with active geometry, then a resolved result; historical requests and evidence are retained. Distinct same-named features still require selection. A fresh catalogue starts empty until searches or a batch import populate it. Every new request creates a persistent job; the browser waits up to five seconds, then invites the user to return later while work continues. Repeated searches reuse the same job.
+GeoXpl opens on a map of southeastern Australia. Enter a feature name, select **River**, **Valley**, **National Park**, **State Forest** or **State Park**, and search. Names are case-insensitive. With **River** selected, the trailing word "River" is optional: "Loddon" and "Loddon River" reuse the same request and results. With **National Park** selected, "National Park" is optional: "Alpine" and "Alpine National Park" reuse the same result. Existing duplicate spellings prefer the request with active geometry, then a resolved result; historical requests and evidence are retained. Distinct same-named features still require selection. A fresh catalogue starts empty until searches or a batch import populate it. Every new request creates a persistent job; the browser waits up to five seconds, then invites the user to return later while work continues. Repeated searches reuse the same job.
+
+## Victorian state parks
+
+Select **State Park** to search named Victorian state parks. Names are case-insensitive and the trailing words "State Park" are optional: "Bunyip" and "Bunyip State Park" reuse the same state-park request. State parks have their own catalogue filter and saved feature type; existing state-forest and national-park requests are never converted automatically. Parks are processed on demand, not bulk-imported.
+
+The `vic-state-park` adapter uses the official [Public Land Management (PLM25)](https://discover.data.vic.gov.au/dataset/public-land-management-plm25) WFS layer `open-data-platform:plm25`, licensed CC BY 4.0. It requires `mmgt_ongen=STATE PARK` and `mmtgen=NATIONAL PARKS ACT AND NATURE CONSERVATION RESERVES`. State forests, national parks and other classifications cannot supply a state-park result. The source matches both names and display labels, then retrieves all parcels for the matched published name. Polygons are unioned with holes and disconnected sections retained, not interpolated. Details and the map show parcel version dates, retrieval provenance and the 1:25,000 mapping scale. The result is a published parcel snapshot, not a surveyed legal boundary or public-access entitlement.
+
+State parks and forests share the bounded, validated PLM25 import engine in `server/plm25.js`, including unique WFS feature-ID checks (not assumed unique `plm_id` values), complete pagination, name closure, geometry limits, checksum provenance and distinct no-match/classification/connection/validation outcomes. Related names are suggestions only; the system never changes the selected feature type or invents boundaries using AI.
+
+Register the documented state-park source and process a first park while the normal server is running:
+
+```powershell
+node --env-file-if-exists=.env scripts/register-state-parks.js --approve-source --seed "Bunyip State Park"
+```
+
+The command does not override a rejected source, and pending processing resumes after restart. Other state parks are added when searched.
 
 ## Victorian state forests
 

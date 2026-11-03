@@ -2,10 +2,11 @@ import { z } from 'zod';
 import { publicJson } from './network.js';
 import { capadSource } from './capad.js';
 import { forestSource } from './state-forests.js';
+import { stateParkSource } from './state-parks.js';
 
 export const sourceSchema = z.object({
-  name: z.string().trim().min(2).max(200), type: z.enum(['river', 'valley', 'national_park', 'state_forest']),
-  format: z.enum(['arcgis', 'geojson', 'vic-gmu250', 'ga-dem', 'capad', 'vic-state-forest']), url: z.url().startsWith('https://'),
+  name: z.string().trim().min(2).max(200), type: z.enum(['river', 'valley', 'national_park', 'state_forest', 'state_park']),
+  format: z.enum(['arcgis', 'geojson', 'vic-gmu250', 'ga-dem', 'capad', 'vic-state-forest', 'vic-state-park']), url: z.url().startsWith('https://'),
   nameField: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), idField: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
   licence: z.string().max(500), attribution: z.string().max(500), version: z.string().max(200),
   completeness: z.enum(['unknown', 'partial', 'complete']), aliases: z.array(z.string().max(150)).max(20),
@@ -21,6 +22,7 @@ const reportJsonSchema = z.toJSONSchema(reportSchema, {
 export const aiConfigured = () => !!(process.env.OPENAI_API_KEY && process.env.OPENAI_MODEL);
 
 export async function research(job, store, reason, diagnostics = {}) {
+  if(job.type==='state_park')return {provider:'official PLM25 catalogue',summary:`${reason} State parks require published State Park parcels, not AI-generated boundaries.`,nextSteps:['Check the approved PLM25 source, published park name or label and current State Park classification.','Other park and forest types are suggestions only; they are not automatically substituted.'],evidence:[{title:'Victorian Public Land Management (PLM25)',url:'https://discover.data.vic.gov.au/dataset/public-land-management-plm25'}],candidates:[stateParkSource]};
   if(job.type==='state_forest')return {provider:'official PLM25 catalogue',summary:`${reason} State forests require published named State Forest parcels; unnamed land is not assigned by inference.`,nextSteps:['Check the approved PLM25 source, exact published forest name and query completeness.','A missing match does not establish that the forest is absent; review official naming and current land classification.'],evidence:[{title:'Victorian Public Land Management (PLM25)',url:'https://discover.data.vic.gov.au/dataset/public-land-management-plm25'}],candidates:[forestSource]};
   if(job.type==='national_park')return {provider:'official CAPAD catalogue',summary:`${reason} National parks require a validated published boundary, not AI-generated geometry.`,nextSteps:['Check the approved CAPAD source and complete snapshot.','Review the official park name, legal classification and CAPAD edition; no boundary interpolation is permitted.'],evidence:[{title:'CAPAD 2024',url:'https://www.dcceew.gov.au/environment/land/nrs/science/capad/2024'}],candidates:[capadSource]};
   if (!aiConfigured()) {

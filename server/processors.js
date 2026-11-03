@@ -8,6 +8,7 @@ import { withInterpolations } from './interpolation.js';
 import { processValleyFloor } from './valley-floor.js';
 import { processNationalParks } from './capad.js';
 import { processStateForest } from './state-forests.js';
+import { processStatePark } from './state-parks.js';
 
 export const algorithmVersion = 'directed-geofabric/5.1.0';
 const scopeRegions = new WeakMap();
@@ -159,6 +160,7 @@ function processDirectedSource(item, result) {
 }
 
 function sourceMatches(job, item, boundary, settings, context) {
+  if (job.type === 'state_park') return item.source.format === 'vic-state-park' ? processStatePark(item) : [];
   if (job.type === 'state_forest') return item.source.format === 'vic-state-forest' ? processStateForest(item) : [];
   if (job.type === 'national_park') return item.source.format === 'capad' ? processNationalParks(item) : [];
   if (item.source.format === 'vic-gmu250') return job.type === 'valley' ? [processValleyFloor(item, boundary, settings, context.drainage)] : [];
@@ -222,7 +224,7 @@ export function processGeometry(job, imports, boundary, settings = {}, context =
   };
   const results = labelMatches(job, chosen.matches.map(candidate => {
     const selected = { ...candidate.result, selection: { sourceId: chosen.sourceId, mode: settings.preferredSourceId ? 'administrator' : multiple ? 'identity_evidence_then_resolution_and_coverage' : 'resolution_then_identity_and_endpoints_then_coverage', comparisons } };
-    return ['national_park','state_forest'].includes(job.type) ? selected : withInterpolations(selected, imports.find(i => i.source.id === chosen.sourceId), settings);
+    return ['national_park','state_forest','state_park'].includes(job.type) ? selected : withInterpolations(selected, imports.find(i => i.source.id === chosen.sourceId), settings);
   }), boundary);
   const status = results.every(r => r.status === 'resolved') ? 'resolved' : 'partially_resolved';
   return { status, message: results.length > 1 ? `${results.length} same-named features found. Choose a location.` : status === 'resolved' ? 'Feature ready' : 'Available geometry needs review before it can be shown as the complete feature.', result: results.length === 1 ? results[0] : null, results, comparisons };
