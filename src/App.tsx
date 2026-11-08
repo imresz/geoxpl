@@ -3,6 +3,7 @@ import { Compass, Search, ArrowUpRight, Waves, Mountain, Trees, Database, Loader
 import { MapView } from './MapView';
 import { api, statusLabel, featureLabel, type Job, type Feature, type FeatureSummary, type Interpolation } from './api';
 import { Admin } from './Admin';
+import { hasMappingHistory, MappingHistory } from './MappingHistory';
 import './catalogue.css';
 
 export function Brand() { return <a className="brand" href="/"><span className="brand-symbol"><Compass size={23}/></span><span>Geo<span className="brand-accent">Xpl</span></span></a>; }
@@ -101,6 +102,7 @@ export function App() {
           {selected.interpolationSummary?.notes.map((note, i) => <p key={`interpolation-${i}`} className="warning"><Info size={15}/>{note}</p>)}
           {(selected.source || selected.mouth) && <div className="detail-section"><h2>Network endpoints</h2>{[selected.source, selected.mouth].filter(Boolean).map(endpoint => endpoint && <div className="network-endpoint" key={endpoint.nodeId}><span className={`endpoint-dot ${endpoint === selected.mouth ? 'outlet' : ''}`}/><span><strong>{endpoint.classification}</strong>{endpoint.receivingRiver && <small>{endpoint.joiningRiver ? `Forms ${endpoint.receivingRiver} with ${endpoint.joiningRiver}` : `Joins ${endpoint.receivingRiver}`}</small>}<small>{endpoint.coordinates[1].toFixed(5)}, {endpoint.coordinates[0].toFixed(5)}</small>{endpoint.namingEvidenceUrl && <a className="source-link" href={endpoint.namingEvidenceUrl} target="_blank" rel="noreferrer">Naming evidence<ArrowUpRight size={14}/></a>}</span></div>)}</div>}
           {selected.warnings.map((w, i) => <p className="warning" key={i}><Info size={15}/>{w}</p>)}
+          {hasMappingHistory(selected) && <MappingHistory key={`${selected.id}:${selected.created}`} featureId={selected.id}/>}
           <div className="detail-section"><h2>Provenance</h2>{selected.evidence.filter((e, i, all) => all.findIndex(other => other.sourceId === e.sourceId) === i).map(e => <a key={e.sourceId} className="source-link" href={e.sourceUrl} target="_blank" rel="noreferrer"><span>{e.sourceName}<small>{e.licence}</small>{selected.extentEstimate && <small>{e.attribution}</small>}</span><ArrowUpRight size={16}/></a>)}<dl><dt>Source records</dt><dd>{selected.evidence.length}</dd><dt>Method</dt><dd>{selected.method.replaceAll('_', ' ')}</dd><dt>Processed</dt><dd>{new Date(selected.created).toLocaleDateString()}</dd></dl><details><summary>Processing evidence</summary><pre>{JSON.stringify({ id: selected.id, algorithm: selected.algorithmVersion, extentEstimate: selected.extentEstimate, principalDrainage: selected.principalDrainage, terrain: selected.terrain, identity: selected.identity, selection: selected.selection, mainStem: selected.mainStem, source: selected.source, mouth: selected.mouth, evidence: selected.evidence, interpolations: selected.interpolations, interpolationSummary: selected.interpolationSummary }, null, 2)}</pre></details></div>
         </> : job?.selectionRequired && !waiting ? <section className="matching-features" aria-label="Matching features">
           <div className="panel-title"><h1>{job.query}</h1></div>

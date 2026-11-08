@@ -23,6 +23,7 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
     CREATE TABLE IF NOT EXISTS imports(id TEXT PRIMARY KEY, source_id TEXT NOT NULL, job_id TEXT NOT NULL, created TEXT NOT NULL, checksum TEXT NOT NULL, payload TEXT NOT NULL, metadata TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS features(id TEXT PRIMARY KEY, job_id TEXT UNIQUE NOT NULL, data TEXT NOT NULL, created TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS derivations(id TEXT PRIMARY KEY, feature_id TEXT NOT NULL, data TEXT NOT NULL, created TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS derivations_feature ON derivations(feature_id);
     CREATE TABLE IF NOT EXISTS reports(id TEXT PRIMARY KEY, job_id TEXT NOT NULL, data TEXT NOT NULL, status TEXT NOT NULL, created TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, job_id TEXT, action TEXT NOT NULL, detail TEXT NOT NULL, created TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, expires INTEGER NOT NULL);
@@ -159,6 +160,13 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
       } catch (error) { db.exec('ROLLBACK'); throw error; }
     },
     feature(id) { const r = db.prepare('SELECT data FROM features WHERE id=? AND active=1').get(id); return r ? JSON.parse(r.data) : null; },
+    featureRevisions(id) {
+      return db.prepare('SELECT id,created FROM derivations WHERE feature_id=? ORDER BY rowid DESC').all(id);
+    },
+    featureRevision(id, revisionId) {
+      const row = db.prepare('SELECT data FROM derivations WHERE feature_id=? AND id=?').get(id, revisionId);
+      return row ? JSON.parse(row.data) : null;
+    },
     jobFeatures(id) { return db.prepare('SELECT data FROM features WHERE job_id=? AND active=1 ORDER BY identity_key').all(id).map(r => JSON.parse(r.data)); },
     features() { return db.prepare('SELECT data FROM features WHERE active=1 ORDER BY created DESC').all().map(r => JSON.parse(r.data)); },
     report(jobId, data) { const id = randomUUID(); db.prepare('INSERT INTO reports VALUES(?,?,?,?,?)').run(id, jobId, JSON.stringify(data), 'pending', now()); return id; },
