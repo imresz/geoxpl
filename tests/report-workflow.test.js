@@ -193,14 +193,20 @@ test('workflow API requires authentication and persists review audit history',as
   const send=(path,method='GET',body)=>fetch(root+path,{method,headers:{'Content-Type':'application/json',...(cookie?{Cookie:cookie}:{})},...(body?{body:JSON.stringify(body)}:{})});
   try{
     assert.equal((await send(`/api/admin/reports/${f.reportId}/workflow`)).status,401);
+    assert.equal((await send('/api/admin/research-decisions')).status,401);
     const setup=await send('/api/admin/setup','POST',{password:'synthetic-report-password'});cookie=setup.headers.get('set-cookie').split(';')[0];
     assert.equal((await send(`/api/admin/reports/${f.reportId}/investigate`,'POST',{operation:'shell'})).status,400);
     assert.equal((await send(`/api/admin/reports/${f.reportId}/investigate`,'POST',{operation:'source',sourceId:f.sourceId})).status,200);
+    assert.deepEqual(await (await send('/api/admin/research-decisions')).json(), []);
+    const investigation = workflowView(f.store, f.reportId).actions.find(action => action.kind === 'investigate');
+    await runInvestigation(f.store, investigation.id, { load: loader });
+    assert.deepEqual(await (await send('/api/admin/research-decisions')).json(), [f.reportId]);
     assert.equal((await send(`/api/admin/reports/${f.reportId}`,'PATCH',{status:'approved',notes:'Read the evidence.'})).status,200);
     const view=await(await send(`/api/admin/reports/${f.reportId}/workflow`)).json();assert.ok(view.actions.some(a=>a.kind==='review'));
     assert.equal((await send(`/api/admin/reports/${f.reportId}/state`,'POST',{state:'deferred',reason:'Await evidence.'})).status,200);
     assert.equal((await send(`/api/admin/reports/${f.reportId}`,'PATCH',{status:'approved',notes:'Cannot resume implicitly.'})).status,409);
     assert.equal(workflowView(f.store,f.reportId).state,'deferred');
+    assert.deepEqual(await (await send('/api/admin/research-decisions')).json(), []);
   }finally{server.closeAllConnections();await new Promise(r=>server.close(r));f.store.close();}
 });
 

@@ -106,6 +106,17 @@ export function createApp(store, config = {}) {
     catch (error) { res.status(error instanceof z.ZodError ? 400 : 409).json({ error: error instanceof z.ZodError ? error.issues.map(i => i.message).join('; ') : error.message }); }
   };
   app.get('/api/admin/reports/:id/workflow', reportOperation(req => workflowView(store, req.params.id)));
+  app.get('/api/admin/research-decisions', (_req, res) => {
+    const candidates = store.db.prepare(`SELECT report_id FROM report_actions a
+      WHERE kind='investigate' AND status='ready' AND rowid=(
+        SELECT MAX(rowid) FROM report_actions WHERE report_id=a.report_id AND kind='investigate'
+      )`).all();
+    res.json(candidates.filter(({ report_id }) => {
+      const view = workflowView(store, report_id);
+      const result = view.actions.find(action => action.kind === 'investigate');
+      return !view.readOnlyReason && view.state === 'active' && result?.status === 'ready' && !result.stale && result.result.applicable;
+    }).map(({ report_id }) => report_id));
+  });
   app.post('/api/admin/reports/:id/investigate', reportOperation(req => queueInvestigation(store, req.params.id, req.body)));
   app.post('/api/admin/reports/:id/actions/:actionId/apply', reportOperation(req => applyInvestigation(store, req.params.id, req.params.actionId, req.body)));
   app.post('/api/admin/reports/:id/state', reportOperation(req => changeReportState(store, req.params.id, req.body)));

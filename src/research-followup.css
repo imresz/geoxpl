@@ -1,0 +1,31 @@
+.followup-row {
+  display: grid;
+  gap: 8px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.followup-row h3 {
+  display: inline;
+  margin-right: 8px;
+}
+
+.followup-row p {
+  margin-top: 5px;
+  font-size: 13px;
+}
+
+.followup-row .report-buttons {
+  flex-wrap: wrap;
+}
+
+.followup-group {
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+
+.followup-group summary {
+  font-size: 14px;
+  font-weight: 600;
+}

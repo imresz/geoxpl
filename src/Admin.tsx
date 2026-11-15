@@ -3,15 +3,18 @@ import { ArrowLeft, ArrowUpRight, ShieldCheck, LogOut, RefreshCw, Plus, X, Check
 import { api, statusLabel } from './api';
 import { Brand } from './App';
 import { ResearchReport } from './ResearchReport';
+import './research-followup.css';
 
 const blankSource = { name: '', type: 'river', format: 'arcgis', url: '', nameField: 'name', idField: 'OBJECTID', licence: '', attribution: '', version: '', completeness: 'unknown', aliases: [] as string[], notes: '', status: 'pending' };
 const date = (s: string) => new Date(s).toLocaleString();
+type Followup = { report: any; job: any; sources: (typeof blankSource & { id: string })[]; retry: boolean; ready: boolean };
 export function Admin() {
-  const [session, setSession] = useState<any>(null), [password, setPassword] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false), [data, setData] = useState<any>(null), [tab, setTab] = useState('jobs'), [editing, setEditing] = useState<any>(null), [report, setReport] = useState<any>(null), [reportFilter, setReportFilter] = useState('active');
+  const [session, setSession] = useState<any>(null), [password, setPassword] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false), [data, setData] = useState<any>(null), [tab, setTab] = useState('jobs'), [editing, setEditing] = useState<any>(null), [report, setReport] = useState<any>(null);
   const [featureSettings, setFeatureSettings] = useState<any>(null), [aliases, setAliases] = useState('');
   const [batches, setBatches] = useState<any[]>([]), [batchId, setBatchId] = useState('');
+  const [readyReports, setReadyReports] = useState<string[]>([]);
   const selectedBatch = batches.find(b => b.id === batchId) || batches[0];
-  const refresh = () => Promise.all([api('/admin/overview'), api('/admin/batches')]).then(([overview, list]) => { setData(overview); setBatches(list); }).catch(e => setError(e.message));
+  const refresh = () => Promise.all([api('/admin/overview'), api('/admin/batches'), api<string[]>('/admin/research-decisions')]).then(([overview, list, ready]) => { setData(overview); setBatches(list); setReadyReports(ready); }).catch(e => setError(e.message));
   useEffect(() => { api('/admin/session').then(setSession).catch(e => setError(e.message)); }, []);
   useEffect(() => { if (!session?.authenticated) return; refresh(); const timer = setInterval(refresh, 3000); return () => clearInterval(timer); }, [session?.authenticated]);
   async function action(fn: () => Promise<unknown>) { setError(''); setBusy(true); try { await fn(); await refresh(); } catch(e) { setError((e as Error).message); } finally { setBusy(false); } }
@@ -19,12 +22,50 @@ export function Admin() {
   async function saveSource(status: string) {
     await action(async () => { const body = { ...editing, status }; if (editing.id) await api(`/admin/sources/${editing.id}`, 'PATCH', body); else { const added = await api('/admin/sources', 'POST', body); if (status !== 'pending') await api(`/admin/sources/${added.id}`, 'PATCH', body); } setEditing(null); });
   }
-  const currentReport = (r: any) => !data.jobs.find((j: any) => j.id === r.job_id)?.superseded_by && data.reports.find((other: any) => other.job_id === r.job_id)?.id === r.id;
-  const needsReview = (r: any) => r.status === 'pending' && data.jobs.find((j: any) => j.id === r.job_id)?.status !== 'resolved' && currentReport(r);
-  const visibleReports = data?.reports.filter((r: any) => reportFilter === 'all' || (reportFilter === 'active' ? currentReport(r) && !['deferred','dismissed','rejected'].includes(r.status) : reportFilter === 'deferred' ? currentReport(r) && r.status === 'deferred' : !currentReport(r) || ['dismissed','rejected'].includes(r.status))) || [];
-  const pending = data?.reports.filter(needsReview).length || 0;
   const active = (job: any) => ['queued', 'importing', 'processing', 'researching'].includes(job.phase);
-  const supersededBy = (jobId: string) => data?.jobs.find((j: any) => j.id === jobId)?.superseded_by;
+  const seenJobs = new Set<string>();
+  const followups: Followup[] = [];
+  const history: { report: any; job: any; latest: boolean }[] = [];
+  for (const report of data?.reports || []) {
+    const job = data.jobs.find((job: any) => job.id === report.job_id);
+    const latest = !seenJobs.has(report.job_id);
+    seenJobs.add(report.job_id);
+    if (!latest || !job || job.superseded_by || ['deferred', 'dismissed', 'rejected'].includes(report.status)) {
+      history.push({ report, job, latest });
+      continue;
+    }
+    const sources = active(job) || job.status === 'resolved' ? [] : data.sources.filter((source: any) =>
+      source.status === 'pending' && source.type === job.type && report.data.candidateIds?.includes(source.id));
+    const retry = !active(job) && (job.status === 'source_unavailable' || job.phase === 'source_unavailable');
+    const ready = !active(job) && job.status !== 'resolved' && readyReports.includes(report.id);
+    followups.push({ report, job, sources, retry, ready });
+  }
+  const needsInput = (item: Followup) => item.sources.length || item.retry || item.ready;
+  const decisions = followups.filter(needsInput);
+  const updates = followups.filter(item => !needsInput(item));
+  const pending = decisions.length;
+  const followupRow = ({ report, job, sources, retry, ready }: Followup) => {
+    const mapped = job.matches?.length > 0;
+    const working = active(job);
+    const partial = mapped && job.matches.some((match: any) => match.status === 'partially_resolved');
+    return <section className="followup-row" key={report.id}>
+      <div><h3>{job.query}</h3><span className="badge">{working ? 'In progress' : partial ? 'Partially mapped' : statusLabel(job.status)}</span>
+        <p>{sources.length ? 'A proposed data source needs your approval. Approval lets GeoXpl use it; it does not verify the feature.' :
+          ready ? 'An investigation found a change you can review before applying.' :
+          retry ? 'GeoXpl could not reach the data source. Retry once the connection is back.' :
+          working ? 'GeoXpl is still working on this request.' :
+          partial ? 'The map is available, but some of the extent is still unverified.' :
+          mapped ? 'The mapped feature is available.' : 'There is no mapped result yet.'}</p>
+      </div>
+      <div className="report-buttons">
+        {sources.map(source => <button key={source.id} type="button" className="primary small-button" onClick={() => setEditing({ ...source })}>Review source: {source.name}</button>)}
+        {!sources.length && !ready && retry && <button type="button" className="primary small-button" disabled={busy} onClick={() => action(() => api(`/admin/jobs/${job.id}/retry`, 'POST', {}))}><RefreshCw size={14}/>Retry processing</button>}
+        {ready && <button type="button" className="primary small-button" onClick={() => setReport(report)}>Review proposed change</button>}
+        {mapped && <a className="text-button" href={`/?job=${encodeURIComponent(job.id)}`}>View map<ArrowUpRight size={14}/></a>}
+        {!ready && <button type="button" className="text-button" onClick={() => setReport(report)}>Research details<ChevronRight size={14}/></button>}
+      </div>
+    </section>;
+  };
   const selectedFeatures = featureSettings ? data?.features.filter((f: any) => f.id === featureSettings.feature_id || featureSettings.matches?.some((m: any) => m.id === f.id)) || [] : [];
   const landformSelected = featureSettings?.type === 'valley' && data?.sources.some((s: any) => s.id === featureSettings.preferredSourceId && s.format === 'vic-gmu250');
   const setValleyFloor = (key: string, value: unknown) => setFeatureSettings({ ...featureSettings, valleyFloor: { ...featureSettings.valleyFloor, [key]: value } });
@@ -56,7 +97,22 @@ export function Admin() {
         <td>{!j.superseded_by && <div className="request-actions"><button className="icon-button" title="Feature settings" aria-label={`Feature settings for ${j.query}`} disabled={busy || active(j)} onClick={() => { setFeatureSettings({ ...j, ...j.settings }); setAliases((j.settings.aliases || []).join('\n')); }}><Settings2 size={17}/></button><button className="secondary small-button" disabled={busy || active(j)} onClick={() => action(() => api(`/admin/jobs/${j.id}/retry`, 'POST', {}))}><RefreshCw size={14}/>Retry</button><button className="icon-button" title="New AI research (may incur API charges)" aria-label={`New research for ${j.query}`} disabled={busy || active(j)} onClick={() => { if (window.confirm('Request fresh AI research? API charges may apply.')) action(() => api(`/admin/jobs/${j.id}/research`, 'POST', {})); }}><FileSearch size={17}/></button></div>}</td>
       </tr>)}</tbody></table></div>{!data.jobs.length && <div className="empty-state"><ListTodo size={30}/><h2>No requests yet</h2><p>Search for a river or valley from the map.</p></div>}</>}
       {tab === 'sources' && <><div className="section-heading"><h2>Data sources</h2><button className="primary" onClick={() => setEditing({ ...blankSource })}><Plus size={16}/>Add source</button></div><div className="table-wrap"><table><thead><tr><th>Dataset</th><th>Type / format</th><th>Status</th><th>Coverage</th><th/></tr></thead><tbody>{data.sources.map((s: any) => <tr key={s.id}><td><strong>{s.name}</strong><small className="truncate-url">{s.url}</small></td><td>{s.type}<small>{s.format}</small></td><td><span className={`badge ${s.status === 'approved' ? 'green' : s.status === 'pending' ? 'amber' : ''}`}>{statusLabel(s.status)}</span></td><td>{s.completeness}</td><td><button className="secondary small-button" onClick={() => setEditing({ ...s })}>Review<ArrowUpRight size={14}/></button></td></tr>)}</tbody></table></div>{!data.sources.length && <div className="empty-state"><Database size={30}/><h2>No sources registered</h2><p>Research recommendations and manually added sources appear here.</p></div>}</>}
-      {tab === 'reports' && <><div className="section-heading"><h2>Research reports</h2><select className="report-filter" aria-label="Report filter" value={reportFilter} onChange={e=>setReportFilter(e.target.value)}><option value="active">Active reports</option><option value="deferred">Deferred reports</option><option value="history">Historical / dismissed</option><option value="all">All reports</option></select></div><div className="report-list">{visibleReports.map((r: any) => <button key={r.id} onClick={() => setReport(r)}><FileSearch size={22}/><span><strong>{data.jobs.find((j: any) => j.id === r.job_id)?.query || 'Research'}</strong><small className="report-summary">{r.data.summary}</small><span className="report-meta">{r.data.provider} · {date(r.created)}</span></span><span className={`badge ${needsReview(r) ? 'amber' : ''}`}>{supersededBy(r.job_id) ? 'Superseded' : !currentReport(r) ? 'Historical' : r.status === 'approved' ? 'Reviewed' : statusLabel(r.status)}</span><ChevronRight size={18}/></button>)}</div>{!visibleReports.length && <div className="empty-state"><FileSearch size={30}/><h2>No reports in this view</h2></div>}</>}
+      {tab === 'reports' && <>
+        <div className="section-heading"><h2>Research follow-up</h2></div>
+        <section aria-labelledby="followup-input"><h3 id="followup-input">Needs your input <span className="badge amber">{decisions.length}</span></h3>
+          {decisions.length ? decisions.map(followupRow) : <p className="muted">Nothing needs your input right now.</p>}
+        </section>
+        <details className="followup-group"><summary>No immediate action ({updates.length})</summary>
+          {updates.length ? updates.map(followupRow) : <p className="muted">No other current reports.</p>}
+        </details>
+        <details className="followup-group"><summary>Report history ({history.length})</summary>
+          <div className="report-list">{history.map(({ report, job, latest }) => <button key={report.id} onClick={() => setReport(report)}>
+            <FileSearch size={18}/><span><strong>{job?.query || 'Research report'}</strong><small>{date(report.created)}</small></span>
+            <span className="badge">{job?.superseded_by ? 'Superseded' : !latest ? 'Historical' : statusLabel(report.status)}</span><ChevronRight size={18}/>
+          </button>)}</div>
+          {!history.length && <p className="muted">No archived or deferred reports.</p>}
+        </details>
+      </>}
       {tab === 'activity' && <><div className="section-heading"><h2>Processing activity</h2><span className="small muted">Latest 100 events</span></div><div className="table-wrap"><table><thead><tr><th>Time</th><th>Event</th><th>Detail</th></tr></thead><tbody>{data.events.map((e: any) => <tr key={e.id}><td>{date(e.created)}</td><td>{statusLabel(e.action)}</td><td>{e.detail}</td></tr>)}</tbody></table></div></>}
       </>}
     </main>}
