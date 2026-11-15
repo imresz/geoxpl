@@ -13,6 +13,7 @@ import { enqueueBatch, listBatches, batchStatus } from './batches.js';
 import { workflowView, queueInvestigation, applyInvestigation, changeReportState, updateRecommendation, recordReportReview } from './report-workflow.js';
 import { sourceChangeTargets } from './source-selection.js';
 import { isProvenancePilot, mappingLineage } from './provenance.js';
+import { pilotRouteCode } from './road-routes.js';
 
 export function createApp(store, config = {}) {
   const app = express(); app.disable('x-powered-by');
@@ -47,14 +48,21 @@ export function createApp(store, config = {}) {
     store.db.prepare('INSERT INTO sessions VALUES(?,?)').run(createHash('sha256').update(token).digest('hex'), Date.now() + 8 * 3600000);
     res.cookie('geoxpl_session', token, { httpOnly: true, sameSite: 'strict', secure: config.secureCookies || false, maxAge: 8 * 3600000, path: '/' });
   };
-  app.get('/api/config', (_req, res) => res.json({ name: 'GeoXpl', interactiveWaitMs: 5000, types: ['river', 'valley', 'national_park', 'state_forest', 'state_park'] }));
+  app.get('/api/config', (_req, res) => res.json({ name: 'GeoXpl', interactiveWaitMs: 5000, types: ['river', 'valley', 'national_park', 'state_forest', 'state_park', 'road_route'] }));
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
   app.get('/api/catalogue', (req, res) => {
     const status = z.enum(['resolved', 'partially_resolved', 'all']).default('resolved').parse(req.query.status);
     res.json(store.features().filter(f => status === 'all' ? ['resolved', 'partially_resolved'].includes(f.status) : f.status === status).map(summary));
   });
   app.post('/api/search', rateLimit({ windowMs: 60000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many searches. Please wait a minute.' } }), (req, res) => {
-    const input = z.object({ query: z.string().trim().min(2).max(150), type: z.enum(['river', 'valley', 'national_park', 'state_forest', 'state_park']), confirmType: z.boolean().default(false) }).parse(req.body);
+    const input = z.object({ query: z.string().trim().min(2).max(150), type: z.enum(['river', 'valley', 'national_park', 'state_forest', 'state_park', 'road_route']), confirmType: z.boolean().default(false) }).parse(req.body);
+    if (input.type === 'road_route') {
+      const code = pilotRouteCode(input.query);
+      if (!code) return res.status(404).json({ error: 'The Victorian road route pilot covers M1 and A1 only. Historical National Route 1 is not mapped.' });
+      const job = store.jobs().find(j => j.type === 'road_route' && j.normalized === code.toLowerCase());
+      if (!job || !store.jobFeatures(job.id).length) return res.status(404).json({ error: 'This route snapshot has not been imported.' });
+      return res.json(viewJob(job));
+    }
     if (!input.confirmType) {
       const matches = store.searchNameMatches(input.query);
       if (!matches.some(match => match.type === input.type)) {
@@ -165,6 +173,7 @@ export function createApp(store, config = {}) {
   });
   app.post('/api/admin/jobs/:id/retry', (req, res) => {
     const j = store.getJob(req.params.id); if (!j) return res.status(404).json({ error: 'Job not found.' });
+    if (j.type === 'road_route') return res.status(409).json({ error: 'Refresh road routes with the Vicmap import script.' });
     if (j.superseded_by) return res.status(409).json({ error: 'This request is superseded. Use the current request.', replacementJobId: store.currentJob(j.id).id });
     if (['queued', 'importing', 'processing', 'researching'].includes(j.phase)) return res.json(viewJob(j));
     res.json(viewJob(store.retry(j.id)));
@@ -203,6 +212,7 @@ export function createApp(store, config = {}) {
   });
   app.post('/api/admin/jobs/:id/research', (req, res) => {
     const job = store.getJob(req.params.id); if (!job) return res.status(404).json({ error: 'Job not found.' });
+    if (job.type === 'road_route') return res.status(409).json({ error: 'Road route snapshots use the Vicmap import script, not AI research.' });
     if (job.superseded_by) return res.status(409).json({ error: 'This request is superseded. Use the current request.' });
     if (['queued', 'importing', 'processing', 'researching'].includes(job.phase)) return res.status(409).json({ error: 'A processing attempt is already active.' });
     store.setting(`research:${job.id}`, 'true');
