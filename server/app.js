@@ -54,7 +54,17 @@ export function createApp(store, config = {}) {
     res.json(store.features().filter(f => status === 'all' ? ['resolved', 'partially_resolved'].includes(f.status) : f.status === status).map(summary));
   });
   app.post('/api/search', rateLimit({ windowMs: 60000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many searches. Please wait a minute.' } }), (req, res) => {
-    const input = z.object({ query: z.string().trim().min(2).max(150), type: z.enum(['river', 'valley', 'national_park', 'state_forest', 'state_park']) }).parse(req.body);
+    const input = z.object({ query: z.string().trim().min(2).max(150), type: z.enum(['river', 'valley', 'national_park', 'state_forest', 'state_park']), confirmType: z.boolean().default(false) }).parse(req.body);
+    if (!input.confirmType) {
+      const matches = store.searchNameMatches(input.query);
+      if (!matches.some(match => match.type === input.type)) {
+        const alternatives = matches.map(match => ({ query: match.name, type: match.type, saved: true }));
+        if (input.type !== 'river' && / (creek|river|brook|stream)$/.test(normalize(input.query)) && !alternatives.some(match => match.type === 'river')) {
+          alternatives.push({ query: input.query, type: 'river', saved: false });
+        }
+        if (alternatives.length) return res.json({ alternatives });
+      }
+    }
     const count = store.db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE status='pending' AND phase='queued'").get().n;
     if (count > 100) return res.status(429).json({ error: 'The processing queue is full. Please try again later.' });
     const job = store.request(input.query, input.type);

@@ -9,15 +9,19 @@ import './catalogue.css';
 export function Brand() { return <a className="brand" href="/"><span className="brand-symbol"><Compass size={23}/></span><span>Geo<span className="brand-accent">Xpl</span></span></a>; }
 const FeatureIcon = ({type}:{type:string}) => type==='river'?<Waves size={20}/>:['national_park','state_forest','state_park'].includes(type)?<Trees size={20}/>:<Mountain size={20}/>;
 export function App() {
+  type SearchInput = { query: string; type: string; confirmType?: boolean };
+  type SearchAlternative = { query: string; type: string; saved: boolean };
+  const typeLabel = (value: string) => statusLabel(value).replace(/\b\w/g, letter => letter.toUpperCase());
   const [query, setQuery] = useState(''), [type, setType] = useState(''), [job, setJob] = useState<Job | null>(null), [waiting, setWaiting] = useState(false), [error, setError] = useState('');
   const [selected, setSelected] = useState<Feature | null>(null), [tab, setTab] = useState('explore'), [catalogue, setCatalogue] = useState<FeatureSummary[]>([]), [elapsed, setElapsed] = useState(0);
   const [loadingFeature, setLoadingFeature] = useState<string | null>(null);
+  const [typePrompt, setTypePrompt] = useState<{ input: SearchInput; alternatives: SearchAlternative[] } | null>(null);
   const [catalogueType,setCatalogueType]=useState('all');
   const visibleCatalogue=catalogue.filter(f=>catalogueType==='all'||f.type===catalogueType);
   const plmExtent=selected?.statePark||selected?.forest;
   const active = useRef<AbortController | null>(null);
   const panel = useRef<HTMLElement | null>(null);
-  useEffect(() => { panel.current?.scrollTo({ top: 0 }); }, [selected?.id, job?.id, job?.selectionRequired, tab]);
+  useEffect(() => { panel.current?.scrollTo({ top: 0 }); }, [selected?.id, job?.id, job?.selectionRequired, tab, typePrompt]);
   const [showNetwork, setShowNetwork] = useState(false);
   const [showFloor, setShowFloor] = useState(false);
   const [focusedEstimate, setFocusedEstimate] = useState<Interpolation | null>(null);
@@ -39,23 +43,26 @@ export function App() {
   async function selectFeature(id: string, fromCatalogue = false) {
     active.current?.abort();
     const controller = new AbortController(); active.current = controller;
-    setError(''); setLoadingFeature(id); setWaiting(false);
+    setError(''); setTypePrompt(null); setLoadingFeature(id); setWaiting(false);
     try {
       const feature = await api<Feature>(`/features/${id}`, 'GET', undefined, controller.signal);
       if (!controller.signal.aborted) { setSelected(feature); setTab('explore'); if (fromCatalogue) setJob(null); }
     } catch (e) { if (!controller.signal.aborted) setError((e as Error).message); }
     finally { if (active.current === controller) setLoadingFeature(null); }
   }
-  async function search(event?: React.FormEvent, requested?: { query: string; type: string }) {
+  async function search(event?: React.FormEvent, requested?: SearchInput) {
     event?.preventDefault();
     const input = requested || { query, type }; if (!input.query.trim() || !input.type) return;
     active.current?.abort(); const controller = new AbortController(); active.current = controller;
-    setError(''); setJob(null); setSelected(null); setLoadingFeature(null); setWaiting(true); setTab('explore'); setElapsed(0);
+    setError(''); setTypePrompt(null); setJob(null); setSelected(null); setLoadingFeature(null); setWaiting(true); setTab('explore'); setElapsed(0);
     const start = performance.now();
     const timeout = window.setTimeout(() => controller.abort('budget'), 5000);
     const clock = window.setInterval(() => setElapsed(Math.min(5, (performance.now() - start) / 1000)), 100);
     try {
-      let current = await api<Job>('/search', 'POST', input, controller.signal); setJob(current);
+      const response = await api<Job | { alternatives: SearchAlternative[] }>('/search', 'POST', input, controller.signal);
+      if (controller.signal.aborted) return;
+      if ('alternatives' in response) { setTypePrompt({ input, alternatives: response.alternatives }); return; }
+      let current = response; setJob(current);
       while (current.status === 'pending' && performance.now() - start < 4900) {
         await new Promise(resolve => setTimeout(resolve, 450));
         if (controller.signal.aborted) break;
@@ -86,7 +93,14 @@ export function App() {
               {!features.length && <p className="muted small">No {group.title.toLowerCase()} features yet.</p>}
             </section>;
           }) : <div className="empty-state"><Database size={30}/><h2>No processed features yet</h2><p>Saved features will appear here.</p></div>}
-        </> : selected ? <>
+        </> : typePrompt && typePrompt.input.query === query && typePrompt.input.type === type ? <section className="detail-section" aria-labelledby="type-prompt-title">
+          <h2 id="type-prompt-title">Check the name or feature type</h2>
+          <p role="status">You entered “{typePrompt.input.query.trim()}” and selected {typeLabel(typePrompt.input.type)}.</p>
+          <div className="catalogue-list">{typePrompt.alternatives.map(option => <button key={`${option.type}:${option.query}`} type="button" onClick={() => {
+            setQuery(option.query); setType(option.type); void search(undefined, { query: option.query, type: option.type, confirmType: true });
+          }}><FeatureIcon type={option.type}/><span><strong>{option.query} ({typeLabel(option.type)})</strong><small>{option.saved ? 'Saved feature match' : 'Suggested by the name'}</small></span><ArrowUpRight size={16}/></button>)}</div>
+          <button className="secondary full" type="button" onClick={() => void search(undefined, { ...typePrompt.input, confirmType: true })}>Continue as {typeLabel(typePrompt.input.type)}</button>
+        </section> : selected ? <>
           <button className="text-button back" onClick={() => { setSelected(null); if (!job?.selectionRequired) setJob(null); }}><ArrowLeft size={15}/>{job?.selectionRequired ? 'Matching features' : 'Overview'}</button>
           <div className="feature-type"><FeatureIcon type={selected.type}/> {statusLabel(selected.type)}</div>
           <h1 className="feature-name">{featureLabel(selected)}</h1><span className={`badge ${selected.status === 'resolved' ? 'green' : 'amber'}`}>{statusLabel(selected.status)}</span>

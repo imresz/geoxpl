@@ -159,6 +159,12 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
         db.exec('COMMIT'); return saved;
       } catch (error) { db.exec('ROLLBACK'); throw error; }
     },
+    searchNameMatches(query) {
+      const rows = db.prepare(`SELECT DISTINCT j.query AS name,j.type,j.normalized FROM features f
+        JOIN jobs j ON j.id=f.job_id WHERE f.active=1 AND j.superseded_by IS NULL
+        ORDER BY j.type,j.normalized`).all();
+      return rows.filter(row => featureSearchTerms(query, row.type).includes(row.normalized));
+    },
     feature(id) { const r = db.prepare('SELECT data FROM features WHERE id=? AND active=1').get(id); return r ? JSON.parse(r.data) : null; },
     featureRevisions(id) {
       return db.prepare('SELECT id,created FROM derivations WHERE feature_id=? ORDER BY rowid DESC').all(id);
