@@ -13,7 +13,8 @@ import { enqueueBatch, listBatches, batchStatus } from './batches.js';
 import { workflowView, queueInvestigation, applyInvestigation, changeReportState, updateRecommendation, recordReportReview } from './report-workflow.js';
 import { sourceChangeTargets } from './source-selection.js';
 import { isProvenancePilot, mappingLineage } from './provenance.js';
-import { pilotRouteCode } from './road-routes.js';
+import { routeCode, routeJobName } from './road-routes.js';
+import { batchRouteEntry } from './road-route-batch.js';
 
 export function createApp(store, config = {}) {
   const app = express(); app.disable('x-powered-by');
@@ -57,12 +58,11 @@ export function createApp(store, config = {}) {
   app.post('/api/search', rateLimit({ windowMs: 60000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many searches. Please wait a minute.' } }), (req, res) => {
     const input = z.object({ query: z.string().trim().min(2).max(150), type: z.enum(['river', 'valley', 'national_park', 'state_forest', 'state_park', 'road_route']), confirmType: z.boolean().default(false) }).parse(req.body);
     if (input.type === 'road_route') {
-      const code = pilotRouteCode(input.query);
-      if (!code) return res.status(404).json({ error: 'Available Victorian road routes: M1, A1, Route 24 and Route 26. Historical National Route 1 is not mapped.' });
-      const name = /^[0-9]/.test(code) ? `metropolitan route ${code}` : code.toLowerCase();
-      const job = store.jobs().find(j => j.type === 'road_route' && j.normalized === name && !j.superseded_by);
-      if (!job || !store.jobFeatures(job.id).length) return res.status(404).json({ error: 'This route snapshot has not been imported.' });
-      return res.json(viewJob(job));
+      const code = routeCode(input.query);
+      const name = code ? normalize(routeJobName(code)) : null;
+      const job = name && store.db.prepare("SELECT * FROM jobs WHERE type='road_route' AND normalized=? AND superseded_by IS NULL").get(name);
+      if (!job) return res.status(404).json({ error: 'This Victorian road route is not in the catalogue or import queue. Historical National Route 1 is not mapped.' });
+      return res.status(job.status === 'pending' ? 202 : 200).json(viewJob(job));
     }
     if (!input.confirmType) {
       const matches = store.searchNameMatches(input.query);
@@ -74,7 +74,7 @@ export function createApp(store, config = {}) {
         if (alternatives.length) return res.json({ alternatives });
       }
     }
-    const count = store.db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE status='pending' AND phase='queued'").get().n;
+    const count = store.db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE status='pending' AND phase='queued' AND type!='road_route'").get().n;
     if (count > 100) return res.status(429).json({ error: 'The processing queue is full. Please try again later.' });
     const job = store.request(input.query, input.type);
     res.status(job.status === 'resolved' ? 200 : 202).json(viewJob(job));
@@ -143,7 +143,7 @@ export function createApp(store, config = {}) {
       res.status(409).json({ error: error.message });
     }
   });
-  app.get('/api/admin/overview', (_req, res) => res.json({ jobs: store.jobs().map(j => ({ ...j, matches: store.jobFeatures(j.id).map(summary), settings: store.featureSettings(j.id) })), sources: store.sources(), reports: store.reports(), features: store.features().map(({ geometry, recordedNetwork, ...f }) => f), events: store.db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT 100').all(), searches: store.db.prepare('SELECT COUNT(*) AS count FROM searches').get().count, imports: store.db.prepare('SELECT id,source_id,job_id,created,checksum FROM imports ORDER BY created DESC LIMIT 100').all(), aiConfigured: aiConfigured(), aiHourlyLimit: Math.max(1, Math.min(30, Number(process.env.AI_REQUESTS_PER_HOUR) || 3)) }));
+  app.get('/api/admin/overview', (_req, res) => res.json({ jobs: store.jobs().map(j => ({ ...j, matches: store.jobFeatures(j.id).map(summary), settings: store.featureSettings(j.id) })), sources: store.sources(), reports: store.reports(), features: store.features().map(({ geometry, recordedNetwork, ...f }) => f.type === 'road_route' ? summary(f) : f), events: store.db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT 100').all(), searches: store.db.prepare('SELECT COUNT(*) AS count FROM searches').get().count, imports: store.db.prepare('SELECT id,source_id,job_id,created,checksum FROM imports ORDER BY created DESC LIMIT 100').all(), aiConfigured: aiConfigured(), aiHourlyLimit: Math.max(1, Math.min(30, Number(process.env.AI_REQUESTS_PER_HOUR) || 3)) }));
   const validLandformSource = source => (source.format !== 'vic-gmu250' || (source.type === 'valley' && source.url === landformEndpoint)) && (source.format !== 'ga-dem' || (source.type === 'valley' && source.url === demEndpoint));
   app.post('/api/admin/sources', (req, res) => {
     const source = sourceSchema.parse(req.body);
@@ -174,7 +174,9 @@ export function createApp(store, config = {}) {
   });
   app.post('/api/admin/jobs/:id/retry', (req, res) => {
     const j = store.getJob(req.params.id); if (!j) return res.status(404).json({ error: 'Job not found.' });
-    if (j.type === 'road_route') return res.status(409).json({ error: 'Refresh road routes with the Vicmap import script.' });
+    if (j.type === 'road_route' && (!batchRouteEntry(j.query) || !['failed','source_unavailable'].includes(j.status))) {
+      return res.status(409).json({ error: 'Only failed audited route imports can be retried here.' });
+    }
     if (j.superseded_by) return res.status(409).json({ error: 'This request is superseded. Use the current request.', replacementJobId: store.currentJob(j.id).id });
     if (['queued', 'importing', 'processing', 'researching'].includes(j.phase)) return res.json(viewJob(j));
     res.json(viewJob(store.retry(j.id)));

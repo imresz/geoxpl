@@ -14,6 +14,16 @@ The pilot imports exact `route_no` matches from [Vicmap Transport Road Line](htt
 
 Metropolitan Routes 24 and 26 are **partially resolved** matches from the October 2015 VicRoads corridor maps to Vicmap Road Line. They are not verified current signed routes. The dashed map line shows the connected candidate path; the review markers and feature panel identify turns, termini, and competing designations that still need confirmation. The two dated review snapshots in `scripts/data` retain the source record IDs and query metadata. With the server stopped, run `node --env-file-if-exists=.env scripts/import-metro-routes.js --approve-source` to load them. This does not refresh or modify M1 or A1.
 
+The November 2026 coverage audit is also available as a restart-safe bulk import:
+
+```powershell
+node --env-file-if-exists=.env scripts/queue-victorian-routes.js --approve-sources
+```
+
+The persistent batches contain 423 shared M/A/B/C codes, 76 single-source M/A/B/C codes, and seven exact numeric Vicmap codes with unconfirmed numbering scheme. The worker reuses existing M1 and A1, imports Vicmap codes by exact tag, and uses the dated DTP snapshot only for DTP-only codes. It never infers missing road links or maps historical National Route 1. Ambiguous values including `0`, composite codes, and non-M/A/B/C tags are excluded.
+
+Check **Administration > Batches** for progress. After a restart the server resumes queued and interrupted work; rerunning the enqueue command is safe. To retry failed imports, add `--retry-failed` or use **Retry import** under Requests. Disconnected and single-source results, omitted border segments and unavailable topology are flagged as partial. If no record passes the Victorian boundary check, the route is listed as a no-match outcome and no geometry is published. A resolved result means one connected group in the selected Victorian snapshot, not that every sign or road turn was independently checked.
+
 ## Mapping history pilot
 
 Bunyip State Park and the Avoca River have a **How this was mapped** panel. Choose a geometry revision to see its published inputs, processor version, estimates and limitations. The map stays on the current geometry. History uses the existing append-only derivation snapshots, including snapshots saved before the pilot; missing evidence is not inferred from current source settings or research reports.

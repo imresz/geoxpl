@@ -1,13 +1,15 @@
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import { featureSearchTerms, now } from './store.js';
+import { batchRouteEntry } from './road-route-batch.js';
 
 export const batchSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]{2,79}$/),
   name: z.string().trim().min(3).max(120),
   selectionNote: z.string().trim().min(10).max(3000),
   references: z.array(z.object({ title: z.string().trim().min(1).max(200), url: z.url().startsWith('https://') })).max(10).default([]),
-  entries: z.array(z.object({ query: z.string().trim().min(2).max(150), type: z.enum(['river', 'valley', 'national_park', 'state_forest', 'state_park']) })).min(1).max(100)
+  entries: z.array(z.object({ query: z.string().trim().min(2).max(150), type: z.enum(['river', 'valley', 'national_park', 'state_forest', 'state_park', 'road_route']) })
+    .refine(entry => entry.type !== 'road_route' || batchRouteEntry(entry.query)?.query === entry.query, 'Use the canonical name of an audited road route.')).min(1).max(100)
 }).strict().refine(value => new Set(value.entries.map(e => `${e.type}:${featureSearchTerms(e.query, e.type)[0]}`)).size === value.entries.length, 'Batch names must be distinct, including optional River suffixes.');
 
 const activePhases = new Set(['queued', 'importing', 'processing', 'researching']);

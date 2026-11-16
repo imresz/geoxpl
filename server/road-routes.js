@@ -18,15 +18,26 @@ export function pilotRouteCode(query) {
   return /^(?:route )?([ma]) ?1$/.exec(value)?.[1].toUpperCase().concat('1') ?? null;
 }
 
+export function routeCode(query) {
+  const value = normalize(query);
+  const alpha = /^(?:route )?([mabc]) ?([0-9]{1,3})$/.exec(value);
+  if (alpha) return (alpha[1] + alpha[2]).toUpperCase();
+  return /^(?:(?:(?:state|metropolitan|metro|numbered) )?route )?([1-9][0-9]?)$/.exec(value)?.[1] ?? null;
+}
+
+export const routeJobName = code => ['24', '26'].includes(code) ? `Metropolitan Route ${code}` :
+  /^\d/.test(code) ? `Numbered Route ${code}` : code;
+
 export async function importRoadRoute(code, load = publicJson) {
-  if (!['M1', 'A1'].includes(code)) throw Error('Unsupported pilot route.');
+  if (!/^(?:[MABC][0-9]{1,3}|[1-9][0-9]?)$/.test(code)) throw Error('Unsupported route code.');
   const records = [], requests = [], ids = new Set(), pfis = new Set();
   let expected;
   for (let offset = 0; offset === 0 || offset < expected; offset = records.length) {
     const params = new URLSearchParams({
       service: 'WFS', version: '2.0.0', request: 'GetFeature', typeNames: 'open-data-platform:tr_road',
       outputFormat: 'application/json', srsName: 'EPSG:4326', count: '500', startIndex: String(offset),
-      sortBy: 'pfi A', cql_filter: `route_no='${code}'`
+      sortBy: 'pfi A', cql_filter: `route_no='${code}'`,
+      propertyName: 'geom,pfi,route_no,from_ufi,to_ufi,ezi_road_name_label,feature_type_code'
     });
     const url = `${routeSource.url}?${params}`;
     requests.push(url);
@@ -54,6 +65,7 @@ export function buildRoadRoute(code, snapshot, boundary) {
   const { records, metadata } = snapshot;
   if (!['Polygon', 'MultiPolygon'].includes(boundary?.geometry?.type)) throw Error('Victorian polygon required.');
   const parent = new Map();
+  const junctionPositions = new Map(), conflictingJunctions = new Set();
   function root(node) {
     if (!parent.has(node)) parent.set(node, node);
     while (parent.get(node) !== node) {
@@ -74,10 +86,17 @@ export function buildRoadRoute(code, snapshot, boundary) {
     // A multipart record or missing junction cannot establish connectivity.
     const valid = lines.length === 1 && [p.from_ufi, p.to_ufi].every(n => Number.isSafeInteger(n) && n > 0);
     const from = valid ? p.from_ufi : `unknown:${index}`;
-    if (valid) parent.set(root(p.to_ufi), root(from));
+    if (valid) {
+      parent.set(root(p.to_ufi), root(from));
+      for (const [node, coord] of [[p.from_ufi, lines[0][0]], [p.to_ufi, lines[0].at(-1)]]) {
+        const first = junctionPositions.get(node);
+        if (first && Math.hypot((first[0] - coord[0]) * 88000, (first[1] - coord[1]) * 111000) > 5) conflictingJunctions.add(node);
+        if (!first) junctionPositions.set(node, coord);
+      }
+    }
     return [{ from, lines, valid, record }];
   });
-  if (!segments.length) throw Error('No tagged segments within the Victorian boundary.');
+  if (!segments.length) throw Object.assign(Error('No tagged segments within the Victorian boundary.'), { code: 'NO_VICTORIAN_ROUTE_SEGMENTS' });
   const groups = new Map();
   for (const segment of segments) {
     const key = root(segment.from);
@@ -85,7 +104,7 @@ export function buildRoadRoute(code, snapshot, boundary) {
   }
   const geometry = multiLineString(segments.flatMap(segment => segment.lines));
   const unverified = segments.filter(segment => !segment.valid).length;
-  const connected = groups.size === 1 && !unverified;
+  const connected = groups.size === 1 && !unverified && !conflictingJunctions.size;
   return { records: segments.map(segment => segment.record), result: {
     identityKey: `vicmap:road-route:${code}`, displayName: `${code} (Victoria)`,
     geometry: geometry.geometry, bbox: bbox(geometry), lengthKm: null, areaKm2: null,
@@ -93,6 +112,7 @@ export function buildRoadRoute(code, snapshot, boundary) {
     method: 'vicmap_exact_route_code', algorithmVersion: metadata.adapter,
     warnings: [
       ...connected ? [] : ['The tagged records do not form one verified connected network. No missing links have been inferred.'],
+      ...(conflictingJunctions.size ? [`${conflictingJunctions.size} shared junction IDs have coordinates more than 5 m apart; those connections are unverified.`] : []),
       'Only records whose mapped vertices fall inside the Victorian map boundary are shown. Cross-border records may be omitted at the state line.'
     ],
     roadRoute: { code, retrievedAt: metadata.retrievedAt, segments: segments.length, components: groups.size,

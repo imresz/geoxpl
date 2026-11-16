@@ -6,6 +6,7 @@ import { deriveTerrainValley } from './terrain.js';
 import { drainageFingerprint } from './valley-floor.js';
 import { runInvestigation } from './report-workflow.js';
 import { selectSources } from './source-selection.js';
+import { runRoadRouteJob } from './road-route-batch.js';
 
 export function createWorker(store, options = {}) {
   const importer = options.importer || importSource, researcher = options.researcher || research;
@@ -15,6 +16,7 @@ export function createWorker(store, options = {}) {
   async function run(job) {
     const plmJob=['state_forest','state_park'].includes(job.type),plmTitle=job.type==='state_park'?'State Park':'State Forest',plmSlug=job.type==='state_park'?'state-park':'state-forest';
     if (store.getJob(job.id)?.superseded_by) return;
+    if (job.type === 'road_route') return runRoadRouteJob(store, job, options);
     const settings = store.featureSettings(job.id);
     const {selected:sources,duplicates}=selectSources(store,job,settings);
     for (const duplicate of duplicates) store.event(job.id,'source_duplicate_skipped',`${duplicate.source.name}: equivalent to ${duplicate.selected.name}; using source ${duplicate.selected.id}`);
@@ -161,10 +163,10 @@ export function createWorker(store, options = {}) {
       finally { busy = false; }
       return;
     }
-    const job = store.db.prepare("SELECT * FROM jobs WHERE status='pending' AND phase='queued' ORDER BY created LIMIT 1").get();
+    const job = store.db.prepare("SELECT * FROM jobs WHERE status='pending' AND phase='queued' ORDER BY (type='road_route'), created, rowid LIMIT 1").get();
     if (!job) return;
     busy = true;
-    try { await run(job); } catch (e) { store.updateJob(job.id, 'failed', 'failed', 'Processing failed. An administrator can retry.'); store.event(job.id, 'error', e.message); }
+    try { await run(job); } catch (e) { store.updateJob(job.id, 'failed', 'failed', job.type === 'road_route' ? `Route import failed: ${e.message}` : 'Processing failed. An administrator can retry.'); store.event(job.id, 'error', e.message); }
     finally { busy = false; }
   }
   const timer = setInterval(tick, 350); timer.unref();
