@@ -1,0 +1,32 @@
+.metro-checks {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+}
+
+.metro-checks li {
+  padding: 7px 0 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.metro-checks .text-button {
+  display: flex;
+  overflow-wrap: anywhere;
+}
+
+.metro-checks .text-button svg {
+  flex-shrink: 0;
+}
+
+.metro-checks p {
+  margin-top: 4px;
+}
+
+.metro-code {
+  display: contents;
+}
+
+.map-legend .review-point {
+  background: #a97016;
+  flex-shrink: 0;
+}

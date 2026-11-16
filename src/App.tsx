@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Compass, Route, Search, ArrowUpRight, Waves, Mountain, Trees, Database, LoaderCircle, ArrowLeft, Check, Clock3, ShieldCheck, X, Info } from 'lucide-react';
 import { MapView } from './MapView';
+import { MetroRouteReview } from './MetroRouteReview';
+import './metro-review.css';
 import { api, statusLabel, featureLabel, type Job, type Feature, type FeatureSummary, type Interpolation } from './api';
 import { Admin } from './Admin';
 import { hasMappingHistory, MappingHistory } from './MappingHistory';
@@ -25,7 +27,8 @@ export function App() {
   const [showNetwork, setShowNetwork] = useState(false);
   const [showFloor, setShowFloor] = useState(false);
   const [focusedEstimate, setFocusedEstimate] = useState<Interpolation | null>(null);
-  useEffect(() => { setShowNetwork(false); setShowFloor(false); setFocusedEstimate(null); }, [selected]);
+  const [reviewFocus, setReviewFocus] = useState<[number, number] | null>(null);
+  useEffect(() => { setShowNetwork(false); setShowFloor(false); setFocusedEstimate(null); setReviewFocus(null); }, [selected]);
   const displayedFeature = useMemo(() => selected && showNetwork && selected.recordedNetwork ? { ...selected, geometry: selected.recordedNetwork.geometry, bbox: selected.recordedNetwork.bbox, displayBbox: selected.recordedNetwork.bbox, interpolations: undefined } : selected && showFloor && selected.valleyFloor ? { ...selected, ...selected.valleyFloor, displayBbox: selected.valleyFloor.bbox } : selected, [selected, showNetwork, showFloor]);
   const refreshCatalogue = () => api<FeatureSummary[]>('/catalogue?status=all').then(setCatalogue).catch(() => {});
   useEffect(() => { refreshCatalogue(); return () => active.current?.abort(); }, []);
@@ -111,7 +114,8 @@ export function App() {
           {displayedFeature?.extentEstimate && <p className="muted small">{displayedFeature.extentEstimate.sourceScale}</p>}
           {selected.mainStem?.limitations && <details className="candidate-limits"><summary>{selected.mainStem.status === 'candidate' ? 'Candidate limitations' : 'Dataset limitations'}</summary>{selected.mainStem.limitations.map((text, i) => <p className="muted small" key={i}>{text}</p>)}</details>}
           {selected.park&&<div className="detail-section"><h2>Published park boundary</h2><dl><dt>Edition</dt><dd>{selected.park.edition}</dd><dt>Boundary snapshot</dt><dd>{selected.park.boundaryDate}</dd><dt>Park identifier</dt><dd>{selected.park.paId}</dd><dt>Classification</dt><dd>{selected.park.designation}</dd></dl>{selected.park.limitations.map((text,i)=><p className="muted small" key={i}>{text}</p>)}</div>}
-          {selected.roadRoute && <div className="detail-section"><h2>Victorian route snapshot</h2><dl><dt>Tagged segments</dt><dd>{selected.roadRoute.segments}</dd><dt>Connected groups</dt><dd>{selected.roadRoute.components}</dd><dt>Largest group</dt><dd>{selected.roadRoute.largestComponent} segments</dd><dt>Records with unverified junctions</dt><dd>{selected.roadRoute.unverified}</dd><dt>Snapshot retrieved</dt><dd>{new Date(selected.roadRoute.retrievedAt).toLocaleDateString()}</dd></dl><p className="muted small">{selected.roadRoute.mappedKm.toFixed(1)} km of tagged lines, including parallel carriageways. Not a driving distance.</p><details><summary>Road names</summary><ul>{selected.roadRoute.names.map(name => <li key={name}>{name}</li>)}</ul></details></div>}
+          {selected.roadRoute?.review && <MetroRouteReview review={selected.roadRoute.review} segments={selected.roadRoute.segments} onLocate={point => setReviewFocus([...point])}/>}
+          {selected.roadRoute && !selected.roadRoute.review && <div className="detail-section"><h2>Victorian route snapshot</h2><dl><dt>Tagged segments</dt><dd>{selected.roadRoute.segments}</dd><dt>Connected groups</dt><dd>{selected.roadRoute.components}</dd><dt>Largest group</dt><dd>{selected.roadRoute.largestComponent} segments</dd><dt>Records with unverified junctions</dt><dd>{selected.roadRoute.unverified}</dd><dt>Snapshot retrieved</dt><dd>{new Date(selected.roadRoute.retrievedAt).toLocaleDateString()}</dd></dl><p className="muted small">{selected.roadRoute.mappedKm.toFixed(1)} km of tagged lines, including parallel carriageways. Not a driving distance.</p><details><summary>Road names</summary><ul>{selected.roadRoute.names.map(name => <li key={name}>{name}</li>)}</ul></details></div>}
           {plmExtent&&<div className="detail-section"><h2>{selected.type==='state_park'?'Published state-park parcels':'Published state-forest parcels'}</h2><dl><dt>Dataset</dt><dd>{plmExtent.dataset}</dd><dt>Mapping scale</dt><dd>{plmExtent.scale}</dd><dt>Source parcels</dt><dd>{plmExtent.parcelCount}</dd><dt>Record versions</dt><dd>{plmExtent.sourceVersionDates.length?`${plmExtent.sourceVersionDates[0].slice(0,10)}${plmExtent.sourceVersionDates.length>1?` to ${plmExtent.sourceVersionDates.at(-1)!.slice(0,10)}`:''}`:'Not supplied'}</dd></dl>{plmExtent.limitations.map((text,i)=><p className="muted small" key={i}>{text}</p>)}</div>}
           {!!selected.interpolations?.features.length && !showNetwork && <div className="detail-section estimated-connections"><h2>Interpolated connections</h2><p className="muted small">Approximate paths. Excluded from recorded measurements.</p>{selected.interpolations.features.some(f => f.properties.alternativeGroup) && <p className="muted small">Upstream alternatives are possibilities, not a chosen route.</p>}{selected.interpolations.features.map(gap => <button key={gap.properties.id} className="estimate-focus" title={`Show ${gap.properties.label} on map`} onClick={() => setFocusedEstimate({ ...gap })}><span className="legend-interpolated"/><span>{gap.properties.label}<small>{gap.properties.lengthKm.toFixed(2)} km estimated</small></span><ArrowUpRight size={15}/></button>)}</div>}
           {selected.interpolationSummary?.notes.map((note, i) => <p key={`interpolation-${i}`} className="warning"><Info size={15}/>{note}</p>)}
@@ -138,7 +142,7 @@ export function App() {
         </>}
         <div className="panel-footer"><span className="boundary-swatch"/>Victoria boundary<span>01 / AU</span></div>
       </aside>
-      <MapView feature={displayedFeature} focus={showNetwork ? null : focusedEstimate}/>
+      <MapView feature={displayedFeature} focus={showNetwork ? null : focusedEstimate} reviewFocus={reviewFocus}/>
     </main>
     <footer className="app-footer"><span>GeoXpl <span className="footer-divider">/</span> Geographic exploration</span><span className="footer-right"><span className="live-dot"/>Local workspace</span></footer>
   </div>;

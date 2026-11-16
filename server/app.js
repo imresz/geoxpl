@@ -58,8 +58,9 @@ export function createApp(store, config = {}) {
     const input = z.object({ query: z.string().trim().min(2).max(150), type: z.enum(['river', 'valley', 'national_park', 'state_forest', 'state_park', 'road_route']), confirmType: z.boolean().default(false) }).parse(req.body);
     if (input.type === 'road_route') {
       const code = pilotRouteCode(input.query);
-      if (!code) return res.status(404).json({ error: 'The Victorian road route pilot covers M1 and A1 only. Historical National Route 1 is not mapped.' });
-      const job = store.jobs().find(j => j.type === 'road_route' && j.normalized === code.toLowerCase());
+      if (!code) return res.status(404).json({ error: 'Available Victorian road routes: M1, A1, Route 24 and Route 26. Historical National Route 1 is not mapped.' });
+      const name = /^[0-9]/.test(code) ? `metropolitan route ${code}` : code.toLowerCase();
+      const job = store.jobs().find(j => j.type === 'road_route' && j.normalized === name && !j.superseded_by);
       if (!job || !store.jobFeatures(job.id).length) return res.status(404).json({ error: 'This route snapshot has not been imported.' });
       return res.json(viewJob(job));
     }

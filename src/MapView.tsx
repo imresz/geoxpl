@@ -8,7 +8,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 const INITIAL: [number, number, number, number] = [137.5, -40.8, 151.2, -32.5];
 const FEATURE_PADDING = { top: 70, right: 60, bottom: 110, left: 55 };
 const padding = (map: maplibregl.Map) => map.getContainer().clientHeight < 330 ? { top: 35, right: 45, bottom: 50, left: 45 } : FEATURE_PADDING;
-export function MapView({ feature, focus }: { feature: Feature | null; focus?: Interpolation | null }) {
+export function MapView({ feature, focus, reviewFocus }: { feature: Feature | null; focus?: Interpolation | null; reviewFocus?: [number, number] | null }) {
   const element = useRef<HTMLDivElement>(null), map = useRef<maplibregl.Map | null>(null);
   const [loaded, setLoaded] = useState(false), [error, setError] = useState(''), [center, setCenter] = useState('37.10 S, 144.35 E');
   const [showEstimates, setShowEstimates] = useState(true);
@@ -47,7 +47,7 @@ export function MapView({ feature, focus }: { feature: Feature | null; focus?: I
       m.addLayer({ id: 'interpolated-halo', type: 'line', source: 'interpolated', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 6, 'line-dasharray': [0.1, 1.6] } });
       m.addLayer({ id: 'interpolated-line', type: 'line', source: 'interpolated', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#a33f71', 'line-width': 3, 'line-dasharray': [0.1, 3.2] } });
       m.addSource('endpoints', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-      m.addLayer({ id: 'endpoint-points', type: 'circle', source: 'endpoints', paint: { 'circle-radius': 6, 'circle-color': ['match', ['get', 'kind'], 'source', '#186454', '#b84e36'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 } });
+      m.addLayer({ id: 'endpoint-points', type: 'circle', source: 'endpoints', paint: { 'circle-radius': 6, 'circle-color': ['match', ['get', 'kind'], 'review', '#a97016', 'source', '#186454', '#b84e36'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 } });
       setLoaded(true);
     });
     const updateView = () => {
@@ -79,11 +79,17 @@ export function MapView({ feature, focus }: { feature: Feature | null; focus?: I
   useEffect(() => {
     if (!loaded || !map.current) return;
     map.current.setPaintProperty('feature-line','line-color',feature?.type==='road_route'?'#984465':feature?.type==='state_park'?'#267f85':feature?.type==='state_forest'?'#697b2b':feature?.type==='national_park'?'#26743c':'#126fcb');
+    map.current.setPaintProperty('feature-line', 'line-dasharray', feature?.roadRoute?.review ? [2, 1.5] : null);
     map.current.setPaintProperty('valley-fill','fill-color',feature?.type==='state_park'?'#57a89a':feature?.type==='state_forest'?'#adba65':feature?.type==='national_park'?'#4c9a54':'#188a75');
     (map.current.getSource('selected') as maplibregl.GeoJSONSource).setData(feature && !feature.extentEstimate ? { type: 'Feature', properties: {}, geometry: feature.geometry } : { type: 'FeatureCollection', features: [] });
     (map.current.getSource('estimated-extent') as maplibregl.GeoJSONSource).setData(feature?.extentEstimate ? { type: 'Feature', properties: {}, geometry: feature.geometry } : { type: 'FeatureCollection', features: [] });
     (map.current.getSource('interpolated') as maplibregl.GeoJSONSource).setData(feature?.interpolations || { type: 'FeatureCollection', features: [] });
-    (map.current.getSource('endpoints') as maplibregl.GeoJSONSource).setData({ type: 'FeatureCollection', features: (['source', 'mouth'] as const).flatMap(kind => feature?.[kind] ? [{ type: 'Feature' as const, properties: { kind }, geometry: { type: 'Point' as const, coordinates: feature[kind]!.coordinates } }] : []) });
+    const points = (['source', 'mouth'] as const).flatMap(kind => feature?.[kind] ? [{ kind, coordinates: feature[kind]!.coordinates }] : []);
+    (map.current.getSource('endpoints') as maplibregl.GeoJSONSource).setData({
+      type: 'FeatureCollection',
+      features: [...points, ...(feature?.roadRoute?.review?.checks || []).map(check => ({ kind: 'review', coordinates: check.coordinates }))]
+        .map(({ kind, coordinates }) => ({ type: 'Feature', properties: { kind }, geometry: { type: 'Point', coordinates } }))
+    });
     if (feature) map.current.fitBounds(bounds, { padding: padding(map.current), maxZoom: 13, duration: 900 });
     const resize = new ResizeObserver(() => {
       map.current?.resize();
@@ -103,13 +109,16 @@ export function MapView({ feature, focus }: { feature: Feature | null; focus?: I
     focus.geometry.coordinates.forEach(p => box.extend([p[0], p[1]]));
     map.current.fitBounds(box, { padding: padding(map.current), maxZoom: 14, duration: 650 });
   }, [focus, loaded]);
+  useEffect(() => {
+    if (loaded && reviewFocus) map.current?.easeTo({ center: reviewFocus, zoom: 15, duration: 650 });
+  }, [reviewFocus, loaded]);
   return <section className="map-region" aria-label="Interactive geographical map">
     <div className="map-canvas" ref={element} />
     <div className="map-summary"><div className="map-location"><MapPin size={14}/><span>{feature ? featureLabel(feature) : 'Southeastern Australia'}</span></div>
     <section className="map-legend" aria-label="Map legend"><strong>Map legend</strong>
       <label className="contour-toggle"><input type="checkbox" aria-label="Show contours" checked={showContours} disabled={!loaded} onChange={e => setShowContours(e.target.checked)}/><i className="legend-contour"/>Contours (Victoria)</label>
       {showContours && <span className="contour-status" role="status">{contourAvailability || (contourError ? 'Some contour tiles unavailable' : contourLoading ? 'Loading contours' : 'Elevations in metres')}{contourError && !contourAvailability && <button className="contour-retry" title="Retry contours" aria-label="Retry contours" onClick={() => setContourAttempt(n => n + 1)}><RefreshCw size={14}/></button>}</span>}
-      {feature && (feature.type === 'road_route' ? <span><i className="legend-recorded" style={{borderColor:'#984465'}}/>Published route segments</span> : ['national_park','state_forest','state_park'].includes(feature.type)?<><span><i className="legend-recorded" style={{borderColor:feature.type==='state_park'?'#267f85':feature.type==='state_forest'?'#697b2b':'#26743c'}}/>{feature.type==='state_park'?'Published state-park parcels':feature.type==='state_forest'?'Published state-forest parcels':'Published park boundary'}</span><span>{feature.type!=='national_park'?`PLM25 record version: ${plmExtent?.sourceVersionDates.at(-1)?.slice(0,10)||'Not supplied'}`:`CAPAD snapshot: ${feature.park?.boundaryDate}`}</span></>:feature.extentEstimate ? <><label><input type="checkbox" aria-label={`Show ${feature.extentEstimate.label.toLowerCase()}`} checked={showEstimates} onChange={e => setShowEstimates(e.target.checked)}/><i className="legend-interpolated"/>{feature.extentEstimate.label}</label><span>Partial; boundary unverified</span></> : <><span><i className="legend-recorded"/>Recorded geometry</span><label><input type="checkbox" aria-label="Show interpolated connections" checked={showEstimates} disabled={!estimates.length} onChange={e => setShowEstimates(e.target.checked)}/><i className="legend-interpolated"/>Interpolated (unverified)</label></>)}
+      {feature && (feature.type === 'road_route' ? feature.roadRoute?.review ? <><span><i className="legend-recorded" style={{borderColor:'#984465',borderTopStyle:'dashed'}}/>Matched alignment, signing unverified</span><span><i className="endpoint-dot review-point"/>Junctions to verify</span></> : <span><i className="legend-recorded" style={{borderColor:'#984465'}}/>Published route segments</span> : ['national_park','state_forest','state_park'].includes(feature.type)?<><span><i className="legend-recorded" style={{borderColor:feature.type==='state_park'?'#267f85':feature.type==='state_forest'?'#697b2b':'#26743c'}}/>{feature.type==='state_park'?'Published state-park parcels':feature.type==='state_forest'?'Published state-forest parcels':'Published park boundary'}</span><span>{feature.type!=='national_park'?`PLM25 record version: ${plmExtent?.sourceVersionDates.at(-1)?.slice(0,10)||'Not supplied'}`:`CAPAD snapshot: ${feature.park?.boundaryDate}`}</span></>:feature.extentEstimate ? <><label><input type="checkbox" aria-label={`Show ${feature.extentEstimate.label.toLowerCase()}`} checked={showEstimates} onChange={e => setShowEstimates(e.target.checked)}/><i className="legend-interpolated"/>{feature.extentEstimate.label}</label><span>Partial; boundary unverified</span></> : <><span><i className="legend-recorded"/>Recorded geometry</span><label><input type="checkbox" aria-label="Show interpolated connections" checked={showEstimates} disabled={!estimates.length} onChange={e => setShowEstimates(e.target.checked)}/><i className="legend-interpolated"/>Interpolated (unverified)</label></>)}
     </section>
     {error && <div className="map-error" role="status">{error}<button aria-label="Dismiss map message" onClick={() => setError('')}>×</button></div>}</div>
     <div className="map-tools">

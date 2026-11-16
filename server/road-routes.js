@@ -12,7 +12,10 @@ export const routeSource = {
 };
 
 export function pilotRouteCode(query) {
-  return /^(?:route )?([ma]) ?1$/.exec(normalize(query))?.[1].toUpperCase().concat('1') ?? null;
+  const value = normalize(query);
+  const metro = /^(?:(?:(?:state|metropolitan|metro) )?route )?(24|26)$/.exec(value);
+  if (metro) return metro[1];
+  return /^(?:route )?([ma]) ?1$/.exec(value)?.[1].toUpperCase().concat('1') ?? null;
 }
 
 export async function importRoadRoute(code, load = publicJson) {

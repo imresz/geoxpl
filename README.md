@@ -2,15 +2,17 @@
 
 An initial working implementation of [Initial requirement 01092026.txt](docs/Initial%20requirement%2001092026.txt).
 
-GeoXpl opens on a map of southeastern Australia. Enter a feature name, select **River**, **Valley**, **National Park**, **State Forest** or **State Park**, and search. Names are case-insensitive. With **River** selected, the trailing word "River" is optional: "Loddon" and "Loddon River" reuse the same request and results. With **National Park** selected, "National Park" is optional: "Alpine" and "Alpine National Park" reuse the same result. Existing duplicate spellings prefer the request with active geometry, then a resolved result; historical requests and evidence are retained. Distinct same-named features still require selection. A fresh catalogue starts empty until searches or a batch import populate it. Every new request creates a persistent job; the browser waits up to five seconds, then invites the user to return later while work continues. Repeated searches reuse the same job.
+  GeoXpl opens on a map of southeastern Australia. Enter a feature name, select **River**, **Valley**, **National Park**, **State Forest** or **State Park**, and search. Names are case-insensitive. With **River** selected, the trailing word "River" is optional: "Loddon" and "Loddon River" reuse the same request and results. With **National Park** selected, "National Park" is optional: "Alpine" and "Alpine National Park" reuse the same result. Existing duplicate spellings prefer the request with active geometry, then a resolved result; historical requests and evidence are retained. Distinct same-named features still require selection. A fresh catalogue starts empty until searches or a batch import populate it. Every new request creates a persistent job; the browser waits up to five seconds, then invites the user to return later while work continues. Repeated searches reuse the same job.
 
 ## Victorian road route pilot
 
-Choose **Road Route** and search for **M1** or **A1**, or use the catalogue's Road routes filter. These are distinct current route codes. Historical National Route 1 is not mapped or aliased to either.
+Choose **Road Route** and search for **M1**, **A1**, **State Route 24** or **State Route 26**, or use the catalogue's Road routes filter. Historical National Route 1 is not mapped or aliased to these routes.
 
 The pilot imports exact `route_no` matches from [Vicmap Transport Road Line](https://discover.data.vic.gov.au/en_AU/dataset/vicmap-transport-road-line), then retains records whose mapped vertices lie inside the bundled Victorian boundary. Connections are checked using the published junction IDs, not proximity. Separate groups remain separate; parallel carriageways and tagged ramps can be included. The sum of mapped line lengths is not driving distance.
 
 `node --env-file-if-exists=.env scripts/import-road-routes.js --approve-source --check-only` audits the current source without writing to SQLite. Omit `--check-only` to save new catalogue revisions. Run the writing import with the server stopped.
+
+Metropolitan Routes 24 and 26 are **partially resolved** matches from the October 2015 VicRoads corridor maps to Vicmap Road Line. They are not verified current signed routes. The dashed map line shows the connected candidate path; the review markers and feature panel identify turns, termini, and competing designations that still need confirmation. The two dated review snapshots in `scripts/data` retain the source record IDs and query metadata. With the server stopped, run `node --env-file-if-exists=.env scripts/import-metro-routes.js --approve-source` to load them. This does not refresh or modify M1 or A1.
 
 ## Mapping history pilot
 
