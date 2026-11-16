@@ -7,11 +7,21 @@ export const valleyFloorSchema = z.object({
   sourceId: z.string().min(1), drainageFeatureId: z.string().min(1),
   recordIds: z.array(z.string().regex(/^gmu250\.[1-9][0-9]*$/)).min(1).max(32),
   scopeNote: z.string().trim().min(20).max(2000),
-  evidenceUrl: z.url().startsWith('https://')
+  evidenceUrl: z.url().startsWith('https://'),
+  reviewedPartialDrainageChecksum: z.string().regex(/^[0-9a-f]{64}$/).optional()
 }).strict();
 
 export function drainageFingerprint(drainage) {
   return createHash('sha256').update(JSON.stringify({ geometry: drainage.geometry, evidence: drainage.evidence, status: drainage.status, algorithmVersion: drainage.algorithmVersion })).digest('hex');
+}
+
+export function eligibleValleyDrainage(definition, drainage) {
+  if (!drainage || drainage.id !== definition.drainageFeatureId || drainage.type !== 'river' ||
+      !['LineString', 'MultiLineString'].includes(drainage.geometry?.type)) return false;
+  return drainage.status === 'resolved' || (drainage.status === 'partially_resolved' &&
+    drainage.method === 'geofabric_directed_main_stem' &&
+    !!drainage.evidence?.some(e => e.role === 'route_segment') &&
+    definition.reviewedPartialDrainageChecksum === drainageFingerprint(drainage));
 }
 
 export async function importValleyLandforms(source, settings, load) {
@@ -37,7 +47,7 @@ export function processValleyFloor(item, boundary, settings, drainage) {
   try {
     const definition = valleyFloorSchema.parse(settings.valleyFloor);
     if (definition.sourceId !== source.id || source.status !== 'approved' || source.type !== 'valley' || source.url !== landformEndpoint) throw Error('Valley-floor source association is not approved.');
-    if (!drainage || drainage.id !== definition.drainageFeatureId || drainage.type !== 'river' || drainage.status !== 'resolved' || !['LineString', 'MultiLineString'].includes(drainage.geometry?.type)) throw Error('A current, resolved principal river is required for a valley-floor estimate.');
+    if (!eligibleValleyDrainage(definition, drainage)) throw Error('A current resolved principal river or an explicitly reviewed revision of mapped reaches is required for a valley-floor estimate.');
     if (!boundary) throw Error('Victoria boundary is required for landform eligibility.');
     const ids = [...new Set(definition.recordIds)].sort();
     if (item.truncated || item.metadata?.adapter !== 'vic-gmu250/1' || JSON.stringify(item.payload.features.map(r => r.id).sort()) !== JSON.stringify(ids)) throw Error('The reviewed landform records are incomplete or do not match this definition.');
@@ -65,11 +75,12 @@ export function processValleyFloor(item, boundary, settings, drainage) {
     return { sourceId: source.id, sourceName: source.name, coverage: 'partial', spanKm: 0,
       result: { geometry: shape.geometry, bbox: bounds, status: 'partially_resolved', confidence: 'estimated', method: 'mapped_landform_valley_floor', algorithmVersion: 'valley-floor/1.0.0',
         lengthKm: null, areaKm2: area(shape) / 1e6, source: null, mouth: null, graph: null,
-        principalDrainage: { featureId: drainage.id, name: drainage.name, checksum: drainageFingerprint(drainage) },
+        principalDrainage: { featureId: drainage.id, name: drainage.name, checksum: drainageFingerprint(drainage), status: drainage.status },
         identity: { excludedRecords: 0, excludedPolygonParts: excludedParts, reviewedLandformIds: ids },
         extentEstimate: { kind: 'valley_floor', label: 'Estimated valley floor', coverage: 'partial', scopeNote: definition.scopeNote, evidenceUrl: definition.evidenceUrl,
           sourceScale: 'Generalised regional landform mapping (approximately 1:100,000 to 1:500,000)' },
         warnings: ['Partial valley-floor estimate, not the complete ridge-to-ridge valley or an official named boundary.',
+          ...(drainage.status === 'partially_resolved' ? ['Only the recorded reaches of the partially mapped principal river support the valley-floor association; dotted river estimates were not used.'] : []),
           'Mapped terraces, fans and floodplains can include connected tributary flats. Valley sides and unmapped gaps are not inferred.',
           'This is not a flood-risk, cadastral or planning boundary.'],
         evidence: [...records.map(record => ({ ...provenance, objectId: record.id })), ...(drainage.evidence || []).map(e => ({ ...e, role: 'principal_drainage_support' }))] } };

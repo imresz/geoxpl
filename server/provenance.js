@@ -2,12 +2,21 @@ import { normalize } from './store.js';
 
 export function isProvenancePilot(feature) {
   return (feature.type === 'state_park' && normalize(feature.statePark?.officialName || feature.displayName || feature.name) === 'bunyip state park') ||
-    (feature.type === 'river' && ['avoca', 'avoca river'].includes(normalize(feature.name)));
+    (feature.type === 'river' && ['avoca', 'avoca river'].includes(normalize(feature.name))) ||
+    isEvidencePilot(feature);
+}
+
+function isEvidencePilot(feature) {
+  return (feature.type === 'road_route' && feature.roadRoute?.code === '24' && !!feature.roadRoute.review) ||
+    (feature.type === 'valley' && normalize(feature.name) === 'yarra valley' && !!feature.extentEstimate);
 }
 
 const methods = {
   plm25_named_state_park_parcels: 'Selected published PLM25 parcels by name and State Park classification, then merged their boundaries while preserving holes and separate areas.',
-  geofabric_directed_main_stem: 'Assembled the river route from the directed Geofabric stream network.'
+  geofabric_directed_main_stem: 'Assembled the river route from the directed Geofabric stream network.',
+  vicmap_2015_metro_corridor_match: 'Matched the 2015 VicRoads route corridor to connected Vicmap road segments.',
+  mapped_landform_valley_floor: 'Combined reviewed mapped terraces, fans and floodplains that intersect the principal drainage.',
+  floor_anchored_terrain_segmentation: 'Extended the reviewed valley floor onto adjoining slopes using relative elevation. Competing terrain lows help constrain the edge.'
 };
 
 // Project the saved result only. Research suggestions and current source settings are not lineage.
@@ -18,6 +27,11 @@ export function mappingLineage(snapshot) {
     processorVersion: snapshot.algorithmVersion,
     status: snapshot.status,
     geometryType: snapshot.geometry?.type,
+    ...(snapshot.roadRoute?.review ? { routeReview: snapshot.roadRoute.review, routeSegments: snapshot.roadRoute.segments } : {}),
+    ...(snapshot.extentEstimate ? {
+      extent: snapshot.extentEstimate, areaKm2: snapshot.areaKm2, floorAreaKm2: snapshot.valleyFloor?.areaKm2,
+      scaleSensitivity: snapshot.terrain?.sensitivity
+    } : {}),
     limitations: [...new Set([
       ...(snapshot.statePark?.limitations || []),
       ...(snapshot.mainStem?.limitations || []),

@@ -2,7 +2,7 @@ import { ArrowUpRight, MapPin } from 'lucide-react';
 import type { MetroReview } from './api';
 
 export function MetroRouteReview({ review, segments, onLocate }: {
-  review: MetroReview; segments: number; onLocate: (point: [number, number]) => void;
+  review: MetroReview; segments: number; onLocate?: (point: [number, number]) => void;
 }) {
   return <section className="detail-section">
     <h2>Matched Vicmap alignment</h2>
@@ -11,7 +11,7 @@ export function MetroRouteReview({ review, segments, onLocate }: {
     <h3>Needs verification</h3>
     <ul className="metro-checks">
       {review.checks.map(({ kind, node, label, note, evidenceUrl, coordinates }) => <li key={node}>
-        <button className="text-button" type="button" onClick={() => onLocate(coordinates)} aria-label={`Locate ${label} on map`}><MapPin size={15}/>{label}</button>
+        {onLocate ? <button className="text-button" type="button" onClick={() => onLocate(coordinates)} aria-label={`Locate ${label} on map`}><MapPin size={15}/>{label}</button> : <p><strong>{label}</strong></p>}
         <span className="badge amber">{kind === 'endpoint' ? 'Endpoint' : 'Turn or transition'}</span>
         <p className="small muted">{note}</p>
         {evidenceUrl && <a className="source-link" href={evidenceUrl} target="_blank" rel="noreferrer">Junction evidence<ArrowUpRight size={15}/></a>}
@@ -21,5 +21,14 @@ export function MetroRouteReview({ review, segments, onLocate }: {
     <p className="small muted">{review.signage}</p>
     {!!review.codes.length && <dl>{review.codes.map(({ code, count }) => <div key={code} className="metro-code"><dt>{code}</dt><dd>{count} segments</dd></div>)}</dl>}
     {review.signageUrl && <a className="source-link" href={review.signageUrl} target="_blank" rel="noreferrer">Signage evidence<ArrowUpRight size={15}/></a>}
+    {!!review.publicObservations?.length && <>
+      <h3>Independent public evidence</h3>
+      <ul className="metro-checks">{review.publicObservations.map(item => <li key={item.url}>
+        <a className="source-link" href={item.url} target="_blank" rel="noreferrer">{item.title}<ArrowUpRight size={15}/></a>
+        <p className="small">{item.publisher} · {item.observed}</p>
+        <p className="small">{item.supports}</p>
+        <p className="small muted">{item.limit}</p>
+      </li>)}</ul>
+    </>}
   </section>;
 }

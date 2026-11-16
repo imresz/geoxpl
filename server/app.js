@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { sourceSchema, aiConfigured } from './research.js';
 import { normalize } from './store.js';
 import { estimatedConnectionsSchema } from './interpolation.js';
-import { valleyFloorSchema, landformEndpoint } from './valley-floor.js';
+import { valleyFloorSchema, landformEndpoint, eligibleValleyDrainage } from './valley-floor.js';
 import { terrainSchema, demEndpoint } from './terrain.js';
 import { formationJunctionsSchema } from './geofabric.js';
 import { enqueueBatch, listBatches, batchStatus } from './batches.js';
@@ -204,7 +204,7 @@ export function createApp(store, config = {}) {
     if (settings.valleyFloor) {
       const definition = settings.valleyFloor, drainage = store.feature(definition.drainageFeatureId);
       if (job.type !== 'valley' || definition.sourceId !== settings.preferredSourceId || !store.sources().some(s => s.id === definition.sourceId && s.status === 'approved' && s.type === 'valley' && s.format === 'vic-gmu250')) return res.status(400).json({ error: 'Select an approved GMU250 geometry source for this valley-floor definition.' });
-      if (!drainage || drainage.type !== 'river' || drainage.status !== 'resolved') return res.status(400).json({ error: 'Select a current resolved river as the principal drainage.' });
+      if (!eligibleValleyDrainage(definition, drainage)) return res.status(400).json({ error: 'Select a current resolved river as the principal drainage, or retain the explicitly reviewed mapped revision.' });
       definition.recordIds = [...new Set(definition.recordIds)].sort();
     }
     if (settings.preferredSourceId && !store.sources().some(s => s.id === settings.preferredSourceId && s.type === job.type && s.status === 'approved' && s.format !== 'ga-dem')) return res.status(400).json({ error: 'Select an approved vector source of the same feature type.' });

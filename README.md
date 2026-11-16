@@ -26,6 +26,10 @@ Check **Administration > Batches** for progress. After a restart the server resu
 
 ## Mapping history pilot
 
+Route 24 and the Yarra Valley have an expandable **How this was mapped** panel. Route 24 retains its 2015-map-to-Vicmap candidate alignment. Independent dated sign observations are linked as location-specific context, not copied geometry or proof of current end-to-end signing. The Yarra Valley can compare its reviewed floor with the terrain estimate; neither is an official or tourism-region boundary. Sources, scale sensitivity, limitations and archived mapping revisions remain separate.
+
+For this pilot, the valley-floor association may use the mapped BoM Geofabric reaches of an explicitly reviewed partial river revision. It does not use interpolated reaches. The approval is tied to the exact drainage fingerprint and a changed river revision invalidates the dependent valley estimate.
+
 Bunyip State Park and the Avoca River have a **How this was mapped** panel. Choose a geometry revision to see its published inputs, processor version, estimates and limitations. The map stays on the current geometry. History uses the existing append-only derivation snapshots, including snapshots saved before the pilot; missing evidence is not inferred from current source settings or research reports.
 
 ## Victorian state parks

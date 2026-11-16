@@ -92,6 +92,7 @@ export async function deriveTerrainValley(floor, source, config, options = {}) {
     terrain: { ...calculated.diagnostics, raster: metadata, sourceId: source.id, floorChecksum: digest(JSON.stringify(floor.geometry)) },
     status: 'partially_resolved', confidence: 'estimated', method: 'floor_anchored_terrain_segmentation', algorithmVersion: terrainVersion,
     warnings: ['Estimated floor-and-slope extent, not a surveyed or authoritative named-valley boundary.',
+      ...(floor.principalDrainage?.status === 'partially_resolved' ? ['The floor association uses only mapped reaches of a partially resolved river. Dotted river estimates were not used.'] : []),
       'The reviewed floor anchors the geographic scope. Connected tributary flats can remain included; named upstream and downstream limits need review.',
       `Terrain-scale agreement is ${(agreement*100).toFixed(0)}% across the tested settings. This measures sensitivity, not a probability of correctness.`,
       'Derived from older SRTM elevations on a 90 m grid. Not suitable for property, flood-risk or planning decisions.'],

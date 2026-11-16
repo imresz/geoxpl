@@ -11,6 +11,14 @@ export const metroSource = {
 };
 const manual = 'https://www.vicroads.vic.gov.au/~/media/files/technical-documents-new/traffic-engineering-manual-v2/tem-vol-2-part-215--as174215-direction-signs-information-signs-and-route-numbering.pdf#page=158';
 const domain = 'https://bigbuild.vic.gov.au/__data/assets/pdf_file/0008/848699/MT-AZ-ConstructionUpdate-March-2024.pdf';
+export const route24PublicObservations = [{
+  title: 'Glen Iris interchange sign photographs',
+  publisher: 'Expressway / Paul Rands',
+  observed: 'October 2024 and September 2025',
+  url: 'https://www.expressway.net.au/gallery/roads/vic/alphanumeric/m1_a1/08_hawthorn-mtwaverley/index.html',
+  supports: 'Dated photographs document directional signs identifying High Street as Route 24 near the Monash Freeway interchange.',
+  limit: 'Evidence of signing at this location on those dates only. It does not establish the complete alignment, turns, or signed endpoints. Photographs are linked, not copied; no geometry is taken from them.'
+}];
 const plans = {
   '24': {
     names: ['LORNE STREET', 'HIGH STREET', 'HIGH STREET ROAD'],
@@ -87,6 +95,7 @@ export function buildMetroRoute(code, snapshot) {
         largestComponent: records.length, unverified: 0, mappedKm: length(geometry),
         names: records.map(r => r.properties.ezi_road_name).filter((n,i,a) => i === 0 || n !== a[i-1]),
         review: { baseline: manual, checks, signage: plan.signage, signageUrl: plan.signageUrl,
+          ...(code === '24' ? { publicObservations: route24PublicObservations } : {}),
           codes: [...tagged].map(([code, count]) => ({ code, count })) }
       }
     }

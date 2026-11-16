@@ -30,3 +30,8 @@
   background: #a97016;
   flex-shrink: 0;
 }
+
+.mapping-disclosure > summary {
+  font-size: 15px;
+  font-weight: 700;
+}

@@ -3,7 +3,7 @@ import { processGeometry, algorithmVersion } from './processors.js';
 import { research, aiConfigured } from './research.js';
 import { createHash } from 'node:crypto';
 import { deriveTerrainValley } from './terrain.js';
-import { drainageFingerprint } from './valley-floor.js';
+import { drainageFingerprint, eligibleValleyDrainage } from './valley-floor.js';
 import { runInvestigation } from './report-workflow.js';
 import { selectSources } from './source-selection.js';
 import { runRoadRouteJob } from './road-route-batch.js';
@@ -70,7 +70,7 @@ export function createWorker(store, options = {}) {
       if (JSON.stringify(store.featureSettings(job.id)) !== JSON.stringify(settings) ||
           JSON.stringify(store.sources().find(s => s.id === settings.terrain.sourceId)) !== JSON.stringify(elevation) ||
           sources.some(s => JSON.stringify(store.sources().find(c => c.id === s.id)) !== JSON.stringify(s)) ||
-          !currentDrainage || currentDrainage.status !== 'resolved' || drainageFingerprint(currentDrainage) !== floor.principalDrainage.checksum) {
+          !eligibleValleyDrainage(settings.valleyFloor, currentDrainage) || drainageFingerprint(currentDrainage) !== floor.principalDrainage.checksum) {
         store.invalidateFeature(job.id, 'Terrain inputs changed during processing.');
         return store.updateJob(job.id, 'pending', 'awaiting_review', 'Terrain inputs changed during processing. Review and retry.');
       }
