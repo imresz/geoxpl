@@ -18,6 +18,9 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
   const db = new DatabaseSync(path);
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL;
     CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS local_route_roads(id TEXT PRIMARY KEY, code TEXT NOT NULL, data TEXT NOT NULL, created TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS local_route_drafts(code TEXT PRIMARY KEY, data TEXT NOT NULL, version INTEGER NOT NULL, state TEXT NOT NULL, feature_id TEXT, created TEXT NOT NULL, updated TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS local_route_actions(id TEXT PRIMARY KEY, code TEXT NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL, created TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, query TEXT NOT NULL, normalized TEXT NOT NULL, type TEXT NOT NULL, status TEXT NOT NULL, phase TEXT NOT NULL, message TEXT NOT NULL, feature_id TEXT, attempts INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL, updated TEXT NOT NULL, UNIQUE(normalized,type));
     CREATE TABLE IF NOT EXISTS sources(id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL, created TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS imports(id TEXT PRIMARY KEY, source_id TEXT NOT NULL, job_id TEXT NOT NULL, created TEXT NOT NULL, checksum TEXT NOT NULL, payload TEXT NOT NULL, metadata TEXT NOT NULL);
@@ -137,11 +140,11 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
       if (existing) { event(jobId, 'snapshot_reused', 'Unchanged import snapshot retained'); return existing.id; }
       const id = randomUUID(); db.prepare('INSERT INTO imports VALUES(?,?,?,?,?,?,?)').run(id, sourceId, jobId, now(), checksum, JSON.stringify(payload), JSON.stringify(metadata)); return id;
     },
-    saveFeature(job, data) { return this.saveFeatures(job, [data])[0]; },
-    saveFeatures(job, data) {
+    saveFeature(job, data, options) { return this.saveFeatures(job, [data], options)[0]; },
+    saveFeatures(job, data, { inTransaction = false } = {}) {
       const keys = data.map(f => f.identityKey || 'single');
       if (new Set(keys).size !== keys.length) throw Error('Matching features require distinct stable identity keys.');
-      db.exec('BEGIN IMMEDIATE');
+      if (!inTransaction) db.exec('BEGIN IMMEDIATE');
       try {
         const previous = db.prepare('SELECT id,identity_key FROM features WHERE job_id=?').all(job.id);
         db.prepare('UPDATE features SET active=0 WHERE job_id=?').run(job.id);
@@ -156,8 +159,9 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
         });
         db.prepare('UPDATE jobs SET feature_id=? WHERE id=?').run(saved.length === 1 ? saved[0].id : null, job.id);
         if (job.type === 'river') invalidateDrainageDependents(previous.map(f => f.id));
-        db.exec('COMMIT'); return saved;
-      } catch (error) { db.exec('ROLLBACK'); throw error; }
+        if (!inTransaction) db.exec('COMMIT');
+        return saved;
+      } catch (error) { if (!inTransaction) db.exec('ROLLBACK'); throw error; }
     },
     searchNameMatches(query) {
       const rows = db.prepare(`SELECT DISTINCT j.query AS name,j.type,j.normalized FROM features f

@@ -15,6 +15,7 @@ type History = {
     routeReview?: MetroReview; routeSegments?: number;
     extent?: ExtentEstimate; areaKm2?: number; floorAreaKm2?: number;
     scaleSensitivity?: { intersectionOverUnion: number; scalesMetres: number[]; areaKm2: number[] };
+    contribution?: { author:string; basis:string; observedAt:string; statement:string; uncertainty:string; version:number; links:string[] };
     estimates?: { id: string; label: string; method: string; certainty: string; lengthKm: number; basis?: string; evidenceRecord?: string }[];
   } | null;
 };
@@ -26,7 +27,7 @@ export function hasMappingHistory(feature: Feature) {
 }
 
 export function evidencePilotKind(feature: Feature) {
-  if (feature.type === 'road_route' && feature.roadRoute?.code === '24' && feature.roadRoute.review) return 'route';
+  if (feature.type === 'road_route' && (feature.roadRoute?.review || feature.roadRoute?.contribution)) return 'route';
   if (feature.type === 'valley' && feature.name.trim().toLowerCase() === 'yarra valley' && feature.extentEstimate) return 'valley';
   return null;
 }
@@ -66,6 +67,12 @@ export function MappingHistory({ featureId, onLocate }: { featureId: string; onL
       : <>
         {history?.revisions[0].id !== history?.revisionId && <p className="muted small">Earlier revision. The map still shows the current geometry.</p>}
         <p>{lineage.description || lineage.method?.replaceAll('_', ' ') || 'Processing method not recorded.'}</p>
+        {lineage.contribution && <section className="detail-section"><h3>Local contribution</h3>
+          <dl><dt>Public credit</dt><dd>{lineage.contribution.author}</dd><dt>Basis</dt><dd>{lineage.contribution.basis.replaceAll('_',' ')}</dd>
+            <dt>Observed</dt><dd>{lineage.contribution.observedAt || 'Not recorded'}</dd><dt>Contribution revision</dt><dd>{lineage.contribution.version}</dd></dl>
+          <p>{lineage.contribution.statement}</p><p className="warning">{lineage.contribution.uncertainty}</p>
+          {lineage.contribution.links.map((url,index)=><a key={url} className="source-link" href={url} target="_blank" rel="noreferrer">Supporting reference {index+1}</a>)}
+        </section>}
         {lineage.routeReview && <MetroRouteReview review={lineage.routeReview} segments={lineage.routeSegments ?? 0} onLocate={history?.revisions[0].id === history?.revisionId ? onLocate : undefined}/>}
         {lineage.extent && <section className="detail-section">
           <h3>{lineage.extent.label}</h3>

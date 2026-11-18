@@ -6,6 +6,10 @@ An initial working implementation of [Initial requirement 01092026.txt](docs/Ini
 
 ## Victorian road route pilot
 
+The **VicRoads Melbourne Metropolitan Route Numbering maps (2015)** are listed in the Source registry as a citation-only reference. Vicmap Transport is the separate geometry source. Reviewed metropolitan matches now include Routes 4, 14, 17, 19 and 21; use `node --env-file-if-exists=.env scripts/import-metro-routes.js --approve-source --expand` to install those snapshots with the server stopped. Route 14 follows a current-network candidate through the post-2015 Dingley Bypass; the current signing there remains unverified. Automatic ordered-road matches for Routes 20 and 22 did not connect end to end; they have no pre-published local contribution.
+
+For a reviewed numeric route, **State Route 21**, **Metropolitan Route 21** and **21** find the metropolitan candidate. An explicit **Numbered Route 21** lookup still finds the separate Vicmap-tagged border result. GeoXpl does not substitute the latter for an explicit metropolitan search.
+
 Choose **Road Route** and search for **M1**, **A1**, **State Route 24** or **State Route 26**, or use the catalogue's Road routes filter. Historical National Route 1 is not mapped or aliased to these routes.
 
 The pilot imports exact `route_no` matches from [Vicmap Transport Road Line](https://discover.data.vic.gov.au/en_AU/dataset/vicmap-transport-road-line), then retains records whose mapped vertices lie inside the bundled Victorian boundary. Connections are checked using the published junction IDs, not proximity. Separate groups remain separate; parallel carriageways and tagged ramps can be included. The sum of mapped line lengths is not driving distance.
@@ -23,6 +27,14 @@ node --env-file-if-exists=.env scripts/queue-victorian-routes.js --approve-sourc
 The persistent batches contain 423 shared M/A/B/C codes, 76 single-source M/A/B/C codes, and seven exact numeric Vicmap codes with unconfirmed numbering scheme. The worker reuses existing M1 and A1, imports Vicmap codes by exact tag, and uses the dated DTP snapshot only for DTP-only codes. It never infers missing road links or maps historical National Route 1. Ambiguous values including `0`, composite codes, and non-M/A/B/C tags are excluded.
 
 Check **Administration > Batches** for progress. After a restart the server resumes queued and interrupted work; rerunning the enqueue command is safe. To retry failed imports, add `--retry-failed` or use **Retry import** under Requests. Disconnected and single-source results, omitted border segments and unavailable topology are flagged as partial. If no record passes the Victorian boundary check, the route is listed as a no-match outcome and no geometry is published. A resolved result means one connected group in the selected Victorian snapshot, not that every sign or road turn was independently checked.
+
+## Admin local route contributions
+
+**Administration > Local contributions** supports Metropolitan Routes 20 and 22. Choose the route, zoom into the Melbourne map, load visible Vicmap roads and select individual segments on the map or in the road list. Enter the public contributor name, evidence basis, optional observation date and HTTPS links, contribution, and remaining uncertainties. The existing Vicmap road source must be approved with its licence and attribution recorded.
+
+**Save draft & preview** persists a private draft and displays the selected geometry. Publication requires that exact saved preview and explicit confirmation of the public credit and notes. The catalogue result is always **partially resolved**, shown with a dashed line and a community-supported label. No missing links are drawn and local knowledge does not certify route identity, signed turns or endpoints. Vicmap supplies the road coordinates; the contributor supplies the proposed route membership. Both are credited separately under **How this was mapped**.
+
+**Withdraw publication** requires a reason and immediately removes the active local result from public search/catalogue output. The saved draft, source snapshots, contribution actions and immutable geometry revisions are retained. Preview and republish the same draft, or save an edited revision after withdrawal. Published drafts are locked against edits, stale drafts/previews cannot publish, and an existing different alignment is never replaced. Drafts and history survive a server restart in the normal SQLite database; the additive tables are created on startup. This pilot does not accept public submissions or change the research engine.
 
 ## Mapping history pilot
 

@@ -1,0 +1,17 @@
+.local-contributions>.section-heading { gap:16px;flex-wrap:wrap; }
+.local-contributions>.section-heading>select { width:280px;max-width:100%; }
+.contribution-layout { display:grid;grid-template-columns:minmax(240px,320px) minmax(0,1fr);gap:24px;align-items:start; }
+.contribution-form { display:grid;gap:14px;min-width:0; }
+.contribution-map { height:440px;width:100%;min-width:0;background:#e3ece7; }
+.contribution-toolbar { display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 0;flex-wrap:wrap; }
+.contribution-roads { max-height:230px;overflow:auto; }
+.contribution-roads label { flex-direction:row;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border);overflow-wrap:anywhere; }
+.contribution-roads input { width:16px;flex-shrink:0; }
+.contribution-roads small { display:block;font-size:10px;color:var(--muted); }
+.contribution-withdraw { display:grid;gap:12px;padding-top:14px;border-top:1px solid var(--border); }
+.contribution-form .report-buttons { flex-wrap:wrap; }
+@media(max-width:760px) {
+  .contribution-layout { grid-template-columns:minmax(0,1fr); }
+  .contribution-layout>div { grid-row:1; }
+  .contribution-map { height:330px; }
+}

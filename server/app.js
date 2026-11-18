@@ -15,6 +15,8 @@ import { sourceChangeTargets } from './source-selection.js';
 import { isProvenancePilot, mappingLineage } from './provenance.js';
 import { routeCode, routeJobName } from './road-routes.js';
 import { batchRouteEntry } from './road-route-batch.js';
+import { readFileSync } from 'node:fs';
+import { localRouteView, localRouteRoads, saveLocalRoute, previewLocalRoute, publishLocalRoute, withdrawLocalRoute } from './local-routes.js';
 
 export function createApp(store, config = {}) {
   const app = express(); app.disable('x-powered-by');
@@ -59,8 +61,15 @@ export function createApp(store, config = {}) {
     const input = z.object({ query: z.string().trim().min(2).max(150), type: z.enum(['river', 'valley', 'national_park', 'state_forest', 'state_park', 'road_route']), confirmType: z.boolean().default(false) }).parse(req.body);
     if (input.type === 'road_route') {
       const code = routeCode(input.query);
-      const name = code ? normalize(routeJobName(code)) : null;
-      const job = name && store.db.prepare("SELECT * FROM jobs WHERE type='road_route' AND normalized=? AND superseded_by IS NULL").get(name);
+      const query = normalize(input.query);
+      const byName = store.db.prepare("SELECT * FROM jobs WHERE type='road_route' AND normalized=? AND superseded_by IS NULL");
+      const find = name => byName.get(normalize(name));
+      const numeric = code && /^[0-9]+$/.test(code);
+      const explicitMetro = /^(?:state|metro|metropolitan) route /.test(query);
+      const explicitTag = /^numbered route /.test(query);
+      const job = !code ? null : !numeric ? find(routeJobName(code)) : explicitTag ? find(`Numbered Route ${code}`) :
+        find(`Metropolitan Route ${code}`) || (!explicitMetro && find(`Numbered Route ${code}`));
+      if (numeric && explicitMetro && !job) return res.status(404).json({ error: `Metropolitan Route ${code} has no reviewed alignment in GeoXpl yet. A matching Vicmap number alone does not identify it.` });
       if (!job) return res.status(404).json({ error: 'This Victorian road route is not in the catalogue or import queue. Historical National Route 1 is not mapped.' });
       return res.status(job.status === 'pending' ? 202 : 200).json(viewJob(job));
     }
@@ -110,6 +119,19 @@ export function createApp(store, config = {}) {
   });
   app.post('/api/admin/logout', requireAdmin, (req, res) => { const token = tokenFrom(req); store.db.prepare('DELETE FROM sessions WHERE token=?').run(createHash('sha256').update(token).digest('hex')); res.clearCookie('geoxpl_session', { path: '/' }); res.json({ ok: true }); });
   app.use('/api/admin', requireAdmin);
+  const contributionBoundary = () => config.boundary || JSON.parse(readFileSync(new URL('../public/victoria.geojson', import.meta.url)));
+  const localOperation = fn => async (req, res) => {
+    try { res.json(await fn(req)); }
+    catch(error) {
+      res.status(error instanceof z.ZodError ? 400 : 409).json({error:error instanceof z.ZodError ? 'Check the contribution fields.' : error.message});
+    }
+  };
+  app.get('/api/admin/local-routes/:code', localOperation(req => localRouteView(store,req.params.code)));
+  app.post('/api/admin/local-routes/:code/roads', localOperation(req => localRouteRoads(store,req.params.code,req.body,contributionBoundary(),config.contributionLoader)));
+  app.put('/api/admin/local-routes/:code', localOperation(req => saveLocalRoute(store,req.params.code,req.body)));
+  app.post('/api/admin/local-routes/:code/preview', localOperation(req => previewLocalRoute(store,req.params.code,contributionBoundary())));
+  app.post('/api/admin/local-routes/:code/publish', localOperation(req => publishLocalRoute(store,req.params.code,req.body,contributionBoundary())));
+  app.post('/api/admin/local-routes/:code/withdraw', localOperation(req => withdrawLocalRoute(store,req.params.code,req.body)));
   const reportOperation = fn => (req, res) => {
     try { res.json(fn(req)); }
     catch (error) { res.status(error instanceof z.ZodError ? 400 : 409).json({ error: error instanceof z.ZodError ? error.issues.map(i => i.message).join('; ') : error.message }); }

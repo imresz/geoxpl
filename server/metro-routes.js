@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { bbox, length, multiLineString } from '@turf/turf';
 import { routeSource } from './road-routes.js';
+import { metroExpansion } from './metro-expansion.js';
 
 export const metroSource = {
   ...routeSource,
@@ -10,6 +11,14 @@ export const metroSource = {
   notes: 'Vicmap geometry matched to the October 2015 VicRoads metropolitan route maps. Current route membership is not verified.'
 };
 const manual = 'https://www.vicroads.vic.gov.au/~/media/files/technical-documents-new/traffic-engineering-manual-v2/tem-vol-2-part-215--as174215-direction-signs-information-signs-and-route-numbering.pdf#page=158';
+export const metroMapsSource = {
+  name: 'VicRoads Melbourne Metropolitan Route Numbering maps (2015)',
+  type: 'road_route', format: 'reference-document', url: manual,
+  nameField: 'Route shield', idField: 'Figure and route number',
+  licence: 'Citation only; no PDF or map imagery redistributed', attribution: 'VicRoads',
+  version: 'October 2015, figures 43 and 44', completeness: 'partial', aliases: [],
+  notes: 'Reference only. Identifies the mapped 2015 corridors, not downloadable geometry or verified current signs. GeoXpl geometry comes from Vicmap Transport.'
+};
 const domain = 'https://bigbuild.vic.gov.au/__data/assets/pdf_file/0008/848699/MT-AZ-ConstructionUpdate-March-2024.pdf';
 export const route24PublicObservations = [{
   title: 'Glen Iris interchange sign photographs',
@@ -20,6 +29,7 @@ export const route24PublicObservations = [{
   limit: 'Evidence of signing at this location on those dates only. It does not establish the complete alignment, turns, or signed endpoints. Photographs are linked, not copied; no geometry is taken from them.'
 }];
 const plans = {
+  ...metroExpansion,
   '24': {
     names: ['LORNE STREET', 'HIGH STREET', 'HIGH STREET ROAD'],
     starts: [43912570, 43912572], ends: [15339553, 52206527],
@@ -58,7 +68,8 @@ export function buildMetroRoute(code, snapshot) {
   let lastNode, roadIndex = -1;
   const lines = records.map(({ id, properties: p, geometry: g }) => {
     const from = p?.audit_from_node, to = p?.audit_to_node;
-    const name = plan.names.indexOf(p?.ezi_road_name);
+    const name = p?.ezi_road_name === plan.names[roadIndex] ? roadIndex :
+      p?.ezi_road_name === plan.names[roadIndex + 1] ? roadIndex + 1 : -1;
     const forward = from === p?.from_ufi && to === p?.to_ufi;
     const reverse = to === p?.from_ufi && from === p?.to_ufi;
     if (typeof id !== 'string' || !id || ids.has(id) || !Number.isSafeInteger(p?.pfi) || p.pfi <= 0 || pfis.has(p.pfi) ||
@@ -67,7 +78,7 @@ export function buildMetroRoute(code, snapshot) {
         (name !== roadIndex && name !== roadIndex + 1) || name < 0 ||
         g?.type !== 'LineString' || !Array.isArray(g.coordinates) || g.coordinates.length < 2 ||
         g.coordinates.some(c => !Array.isArray(c) || c.length !== 2 || !c.every(Number.isFinite) ||
-          c[0] < 144.92 || c[0] > 145.34 || c[1] < -38.02 || c[1] > -37.78)) throw Error('Invalid or disconnected Vicmap review segment.');
+          c[0] < 144.86 || c[0] > 145.38 || c[1] < -38.22 || c[1] > -37.69)) throw Error('Invalid or disconnected Vicmap review segment.');
     ids.add(id); pfis.add(p.pfi); lastNode = to;
     const line = forward ? g.coordinates : [...g.coordinates].reverse();
     if (name !== roadIndex) junctions.push({ node: from, coordinates: line[0] });
