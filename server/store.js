@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { indexRouteRevision } from './route-memberships.js';
 
 export const normalize = value => value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-AU');
 export function featureSearchTerms(query, type, aliases = []) {
@@ -27,6 +28,10 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
     CREATE TABLE IF NOT EXISTS features(id TEXT PRIMARY KEY, job_id TEXT UNIQUE NOT NULL, data TEXT NOT NULL, created TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS derivations(id TEXT PRIMARY KEY, feature_id TEXT NOT NULL, data TEXT NOT NULL, created TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS derivations_feature ON derivations(feature_id);
+    CREATE TABLE IF NOT EXISTS route_membership_revisions(revision_id TEXT PRIMARY KEY REFERENCES derivations(id),feature_id TEXT NOT NULL,origin TEXT NOT NULL,data TEXT NOT NULL,created TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS route_memberships(revision_id TEXT NOT NULL REFERENCES route_membership_revisions(revision_id),feature_id TEXT NOT NULL,segment_key TEXT NOT NULL,geometry_hash TEXT NOT NULL,data TEXT NOT NULL,created TEXT NOT NULL,PRIMARY KEY(revision_id,segment_key));
+    CREATE INDEX IF NOT EXISTS route_memberships_segment ON route_memberships(segment_key);
+    CREATE INDEX IF NOT EXISTS route_memberships_feature ON route_memberships(feature_id,revision_id);
     CREATE TABLE IF NOT EXISTS reports(id TEXT PRIMARY KEY, job_id TEXT NOT NULL, data TEXT NOT NULL, status TEXT NOT NULL, created TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, job_id TEXT, action TEXT NOT NULL, detail TEXT NOT NULL, created TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, expires INTEGER NOT NULL);
@@ -153,7 +158,9 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
           const existing = previous.find(f => f.identity_key === key) || (data.length === 1 && previous.length === 1 && previous[0].identity_key === 'single' ? previous[0] : null);
           const id = existing?.id || randomUUID();
           const result = { ...value, identityKey: key, id, name: job.query, displayName: value.displayName || job.query, type: job.type, aliases: this.featureSettings(job.id).aliases, created: now() };
-          db.prepare('INSERT INTO derivations VALUES(?,?,?,?)').run(randomUUID(), id, JSON.stringify(result), now());
+          const revisionId=randomUUID();
+          db.prepare('INSERT INTO derivations VALUES(?,?,?,?)').run(revisionId, id, JSON.stringify(result), now());
+          indexRouteRevision(db,revisionId);
           db.prepare('INSERT INTO features(id,job_id,identity_key,active,data,created) VALUES(?,?,?,1,?,?) ON CONFLICT(id) DO UPDATE SET identity_key=excluded.identity_key,active=1,data=excluded.data').run(id, job.id, key, JSON.stringify(result), now());
           return result;
         });

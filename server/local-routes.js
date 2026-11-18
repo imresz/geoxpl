@@ -6,7 +6,9 @@ import { buildRoadRoute, routeSource } from './road-routes.js';
 import { now } from './store.js';
 
 const codeSchema = z.enum(['20', '22']);
-const refSchema = z.object({ snapshotId:z.string().uuid(), recordId:z.string().min(1).max(100) }).strict();
+const sectionEvidenceSchema=z.object({statement:z.string().trim().max(1000).default(''),uncertainty:z.string().trim().max(1000).default(''),
+  links:z.array(z.url().startsWith('https://').max(1000)).max(5).default([])}).strict();
+const refSchema = z.object({ snapshotId:z.string().uuid(), recordId:z.string().min(1).max(100),membership:sectionEvidenceSchema.optional() }).strict();
 const draftSchema = z.object({
   version:z.number().int().min(0),
   author:z.string().trim().min(2).max(100),
@@ -46,14 +48,14 @@ function recordsFor(store, code, refs) {
     const record=snapshot.data.features.find(f=>f.id===ref.recordId);
     if (!record || ids.has(record.properties.pfi)) throw Error('Unknown or duplicate selected road segment.');
     ids.add(record.properties.pfi);
-    return {record,snapshotId:ref.snapshotId,retrievedAt:snapshot.created,checksum:snapshot.data.checksum};
+    return {record,snapshotId:ref.snapshotId,retrievedAt:snapshot.created,checksum:snapshot.data.checksum,membership:ref.membership};
   });
 }
 export function localRouteView(store, code) {
   const row=draft(store,code);
   const history=store.db.prepare('SELECT kind,created FROM local_route_actions WHERE code=? ORDER BY rowid DESC').all(code);
   const jobId=row?.feature_id && store.db.prepare('SELECT job_id FROM features WHERE id=?').get(row.feature_id)?.job_id;
-  return row ? {...row,jobId,selected:recordsFor(store,code,row.data.segments).map(r=>({...r.record,snapshotId:r.snapshotId})),history} : null;
+  return row ? {...row,jobId,selected:recordsFor(store,code,row.data.segments).map(r=>({...r.record,snapshotId:r.snapshotId,membership:r.membership})),history} : null;
 }
 
 export async function localRouteRoads(store, code, input, boundary, load=publicJson) {
@@ -128,10 +130,12 @@ export function previewLocalRoute(store,code,boundary) {
   delete contribution.segments;
   const feature={...result,identityKey:`local:metro-route:${code}`,displayName:`Metropolitan Route ${code} (local contribution)`,
     status:'partially_resolved',method:'local_knowledge_vicmap_match',confidence:'community_supported',
-    roadRoute:{...result.roadRoute,contribution},
+    roadRoute:{...result.roadRoute,contribution,
+      names:[...new Set(selected.map(s=>s.record.properties.ezi_road_name || s.record.properties.ezi_road_name_label).filter(Boolean))],
+      membershipNotes:selected.filter(s=>s.membership).map(s=>({pfi:s.record.properties.pfi,...s.membership}))},
     warnings:[...result.warnings,'Community-supported candidate; current route signing, turns and endpoints are not independently verified.',row.data.uncertainty],
     evidence:selected.map(s=>({sourceId:source.id,sourceName:source.name,sourceUrl:source.url,licence:source.licence,
-      attribution:source.attribution,objectId:s.record.id,checksum:s.checksum,sourceVersion:s.retrievedAt,importId:s.snapshotId,role:'contributed_alignment_segment'}))
+      attribution:source.attribution,objectId:s.record.id,pfi:s.record.properties.pfi,checksum:s.checksum,sourceVersion:s.retrievedAt,importId:s.snapshotId,role:'contributed_alignment_segment'}))
   };
   return {version:row.version,checksum:sha({feature,source}),feature};
 }

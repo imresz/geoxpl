@@ -4,7 +4,8 @@ import { Eye, LoaderCircle, MapPin, RotateCcw, Save, Upload } from 'lucide-react
 import { api } from './api';
 import './local-contributions.css';
 
-type Road = GeoJSON.Feature<GeoJSON.LineString, { pfi:number; ezi_road_name_label?:string; ezi_road_name?:string }> & { id:string; snapshotId:string };
+type SectionEvidence={statement:string;uncertainty:string;links:string[]};
+type Road = GeoJSON.Feature<GeoJSON.LineString, { pfi:number; ezi_road_name_label?:string; ezi_road_name?:string }> & { id:string; snapshotId:string;membership?:SectionEvidence };
 type Form = { author:string; basis:string; observedAt:string; statement:string; uncertainty:string; links:string; segments:Road[] };
 const empty = ():Form => ({author:'',basis:'local_knowledge',observedAt:'',statement:'',uncertainty:'',links:'',segments:[]});
 const overview:Record<string,[number,number,number,number]> = {
@@ -83,6 +84,8 @@ export function LocalRouteContributions() {
     if(locked||busy||loading)return;
     edit({segments:form.segments.some(r=>r.id===road.id)?form.segments.filter(r=>r.id!==road.id):[...form.segments,road]});
   };
+  const editSection=(id:string,change:Partial<SectionEvidence>)=>edit({segments:form.segments.map(r=>r.id===id ?
+    {...r,membership:{statement:'',uncertainty:'',links:[],...r.membership,...change}} : r)});
   const act=async(fn:()=>Promise<void>)=>{setBusy(true);setError('');setNotice('');try{await fn();}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
   const loadRoads=()=>act(async()=>{
     const data=await api(`/admin/local-routes/${code}/roads`,'POST',{bounds});
@@ -92,7 +95,8 @@ export function LocalRouteContributions() {
   const save=()=>act(async()=>{
     const value=await api(`/admin/local-routes/${code}`,'PUT',{
       ...form,version:saved?.version||0,links:form.links.split('\n').map(x=>x.trim()).filter(Boolean),
-      segments:form.segments.map(r=>({snapshotId:r.snapshotId,recordId:r.id}))
+      segments:form.segments.map(r=>({snapshotId:r.snapshotId,recordId:r.id,...(r.membership ? {membership:{...r.membership,
+        links:r.membership.links.map(x=>x.trim()).filter(Boolean)}} : {})}))
     });
     adopt(value);
     setPreview(await api(`/admin/local-routes/${code}/preview`,'POST',{}));
@@ -145,7 +149,14 @@ export function LocalRouteContributions() {
         <div className="contribution-toolbar"><button type="button" className="secondary" title={closeView?'Load Vicmap road segments in this map view':'A closer map view is required'} disabled={busy||locked||!closeView} onClick={loadRoads}><MapPin size={16}/>Load visible roads</button>
           <span className="small muted">{form.segments.length} selected{!closeView?' · Overview scale':''}</span></div>
         <details open><summary>Selected segments ({form.segments.length})</summary>
-          <div className="contribution-roads">{form.segments.map(r=><label key={r.id}><input type="checkbox" checked disabled={locked||busy} onChange={()=>toggle(r)}/><span>{r.properties.ezi_road_name||r.properties.ezi_road_name_label||'Unnamed road'}<small>PFI {r.properties.pfi}</small></span></label>)}</div>
+          <div className="contribution-roads contribution-selected">{form.segments.map(r=><div className="contribution-segment" key={r.id}>
+            <label><input type="checkbox" checked disabled={locked||busy} onChange={()=>toggle(r)}/><span>{r.properties.ezi_road_name||r.properties.ezi_road_name_label||'Unnamed road'}<small>PFI {r.properties.pfi}</small></span></label>
+            <details><summary>Section evidence · PFI {r.properties.pfi}</summary>
+              <label className="segment-evidence-field">Evidence for PFI {r.properties.pfi}<textarea rows={2} maxLength={1000} disabled={locked||busy} value={r.membership?.statement || ''} onChange={e=>editSection(r.id,{statement:e.target.value})}/></label>
+              <label className="segment-evidence-field">Uncertainty for PFI {r.properties.pfi}<textarea rows={2} maxLength={1000} disabled={locked||busy} value={r.membership?.uncertainty || ''} onChange={e=>editSection(r.id,{uncertainty:e.target.value})}/></label>
+              <label className="segment-evidence-field">Supporting links for PFI {r.properties.pfi}<textarea rows={2} disabled={locked||busy} value={r.membership?.links.join('\n') || ''} onChange={e=>editSection(r.id,{links:e.target.value.split('\n')})}/></label>
+            </details>
+          </div>)}</div>
         </details>
         <details><summary>Road segments in map view ({roads.length})</summary>
           <div className="contribution-roads">{roads.map(r=><label key={r.id}><input type="checkbox" checked={form.segments.some(s=>s.id===r.id)} disabled={locked||busy} onChange={()=>toggle(r)}/><span>{r.properties.ezi_road_name||r.properties.ezi_road_name_label||'Unnamed road'}<small>PFI {r.properties.pfi}</small></span></label>)}</div>

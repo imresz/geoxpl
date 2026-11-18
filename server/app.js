@@ -17,6 +17,7 @@ import { routeCode, routeJobName } from './road-routes.js';
 import { batchRouteEntry } from './road-route-batch.js';
 import { readFileSync } from 'node:fs';
 import { localRouteView, localRouteRoads, saveLocalRoute, previewLocalRoute, publishLocalRoute, withdrawLocalRoute } from './local-routes.js';
+import { routeMembershipReport } from './route-memberships.js';
 
 export function createApp(store, config = {}) {
   const app = express(); app.disable('x-powered-by');
@@ -98,7 +99,8 @@ export function createApp(store, config = {}) {
     const revisionId = req.query.revision ?? revisions[0]?.id;
     const revision = typeof revisionId === 'string' ? store.featureRevision(id, revisionId) : null;
     if (req.query.revision !== undefined && !revision) return res.status(404).json({ error: 'Geometry revision not found.' });
-    res.json({ revisions, revisionId, lineage: revision ? mappingLineage(revision) : null });
+    res.json({ revisions, revisionId, lineage: revision ? mappingLineage(revision) : null,
+      ...(revision?.type==='road_route' ? {routeMemberships:routeMembershipReport(store.db,id,revisionId)} : {}) });
   });
   app.get('/api/admin/session', (req, res) => res.json({ authenticated: authenticated(req), setupRequired: !store.setting('password'), localSetup: config.localSetup !== false }));
   const loginLimit = rateLimit({ windowMs: 60000, limit: 8, message: { error: 'Too many sign-in attempts. Wait a minute.' } });

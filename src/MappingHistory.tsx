@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, statusLabel, type Feature, type MetroReview, type ExtentEstimate } from './api';
 import { MetroRouteReview } from './MetroRouteReview';
+import { RouteMemberships, type RouteMembershipReport } from './RouteMemberships';
 
 type Evidence = {
   sourceName?: string; sourceUrl?: string; sourceVersion?: string; attribution?: string;
@@ -9,6 +10,7 @@ type Evidence = {
 type History = {
   revisions: { id: string; created: string }[];
   revisionId?: string;
+  routeMemberships?: RouteMembershipReport;
   lineage: {
     method?: string; description?: string; processorVersion?: string; status?: string; geometryType?: string;
     limitations: string[]; evidence?: Evidence[];
@@ -27,7 +29,7 @@ export function hasMappingHistory(feature: Feature) {
 }
 
 export function evidencePilotKind(feature: Feature) {
-  if (feature.type === 'road_route' && (feature.roadRoute?.review || feature.roadRoute?.contribution)) return 'route';
+  if (feature.type === 'road_route' && feature.roadRoute) return 'route';
   if (feature.type === 'valley' && feature.name.trim().toLowerCase() === 'yarra valley' && feature.extentEstimate) return 'valley';
   return null;
 }
@@ -67,6 +69,8 @@ export function MappingHistory({ featureId, onLocate }: { featureId: string; onL
       : <>
         {history?.revisions[0].id !== history?.revisionId && <p className="muted small">Earlier revision. The map still shows the current geometry.</p>}
         <p>{lineage.description || lineage.method?.replaceAll('_', ' ') || 'Processing method not recorded.'}</p>
+        {history?.routeMemberships&&<RouteMemberships key={history.revisionId} report={history.routeMemberships}
+          onLocate={history.revisions[0].id===history.revisionId ? onLocate : undefined}/>}
         {lineage.contribution && <section className="detail-section"><h3>Local contribution</h3>
           <dl><dt>Public credit</dt><dd>{lineage.contribution.author}</dd><dt>Basis</dt><dd>{lineage.contribution.basis.replaceAll('_',' ')}</dd>
             <dt>Observed</dt><dd>{lineage.contribution.observedAt || 'Not recorded'}</dd><dt>Contribution revision</dt><dd>{lineage.contribution.version}</dd></dl>

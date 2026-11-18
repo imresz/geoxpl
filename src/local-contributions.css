@@ -10,6 +10,10 @@
 .contribution-roads small { display:block;font-size:10px;color:var(--muted); }
 .contribution-withdraw { display:grid;gap:12px;padding-top:14px;border-top:1px solid var(--border); }
 .contribution-form .report-buttons { flex-wrap:wrap; }
+.contribution-selected { max-height:500px; }
+.contribution-segment { padding-bottom:10px;border-bottom:1px solid var(--border); }
+.contribution-roads .segment-evidence-field { flex-direction:column;align-items:stretch;border:0;gap:6px; }
+.contribution-segment summary { padding:8px 0;font-size:12px; }
 @media(max-width:760px) {
   .contribution-layout { grid-template-columns:minmax(0,1fr); }
   .contribution-layout>div { grid-row:1; }

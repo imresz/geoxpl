@@ -38,6 +38,22 @@ Check **Administration > Batches** for progress. After a restart the server resu
 
 ## Mapping history pilot
 
+### Shared road sections and route memberships
+
+Every newly published road route now indexes a separate membership claim for each recoverable source road segment and geometry revision. A segment may belong to multiple routes: there is no global uniqueness constraint on its route assignment. Each claim retains the route's numbering scheme, assignment evidence, geometry source/import/checksum, basis and uncertainty. A published source tag, a reviewed corridor and a local contribution remain different evidence classes; none independently verifies present-day concurrent signing. Metropolitan Route 24 and an unconfirmed numeric tag 24 are separate identities, as are historical National Route 1 and A1/M1.
+
+**How this was mapped > Shared road sections** compares the selected current route with other active catalogue alignments using the same source namespace and persistent segment ID. Matching saved coordinates (allowing reversed digitisation) are shown as shared geometry. Different coordinates for the same ID are flagged separately, not silently joined; spatial crossings or similar-looking lines with different IDs are not treated as concurrency. Each shared section shows the two independent claims and can be located on the current map. Withdrawing a route removes it from current comparisons, without erasing its indexed revision evidence. Historical membership records remain viewable with their geometry revision; the current-catalogue comparison is deliberately not attached to an older revision.
+
+The admin contribution editor also accepts optional evidence, uncertainty and HTTPS references for each selected segment. These supplement that route's overall contribution and are preserved on publication, separately from another route's notes for the same road. This does not change the research engine, reinterpret ambiguous composite source codes, or automatically fill missing route memberships.
+
+After upgrading, stop the single GeoXpl server and run:
+
+```powershell
+node --env-file-if-exists=.env scripts/backfill-route-memberships.js --apply
+```
+
+This restart-safe operation indexes retained road-route revisions from saved input snapshots only. It does not fetch new data, alter geometry/status, rewrite original derivations or change source approvals. Re-running skips indexed revisions. Unrecoverable input/assignment records are counted as unlinked and excluded from overlap comparisons. The additive `route_membership_revisions` and `route_memberships` tables are backed up with the normal SQLite database. Future publications index their memberships atomically with their geometry revision.
+
 Route 24 and the Yarra Valley have an expandable **How this was mapped** panel. Route 24 retains its 2015-map-to-Vicmap candidate alignment. Independent dated sign observations are linked as location-specific context, not copied geometry or proof of current end-to-end signing. The Yarra Valley can compare its reviewed floor with the terrain estimate; neither is an official or tourism-region boundary. Sources, scale sensitivity, limitations and archived mapping revisions remain separate.
 
 For this pilot, the valley-floor association may use the mapped BoM Geofabric reaches of an explicitly reviewed partial river revision. It does not use interpolated reaches. The approval is tied to the exact drainage fingerprint and a changed river revision invalidates the dependent valley estimate.
