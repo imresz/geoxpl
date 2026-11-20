@@ -38,7 +38,9 @@ test('metropolitan route queries never substitute the same bare Vicmap tag', asy
     });
     for(const query of ['State Route 21','Metropolitan Route 21','Route 21','21']) assert.equal((await (await search(query)).json()).id,metro.id);
     assert.equal((await (await search('Numbered Route 21')).json()).id,numbered.id);
-    assert.equal((await search('Metropolitan Route 22')).status,404);
+    const missing=await (await search('Metropolitan Route 22')).json();
+    assert.equal(missing.routeSearch.offer.label,'Metropolitan Route 22');
+    assert.deepEqual(missing.routeSearch.matches,[]);
   } finally {
     await new Promise(resolve=>server.close(resolve)); store.close();
   }

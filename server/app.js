@@ -18,6 +18,8 @@ import { batchRouteEntry } from './road-route-batch.js';
 import { readFileSync } from 'node:fs';
 import { localRouteView, localRouteRoads, saveLocalRoute, previewLocalRoute, publishLocalRoute, withdrawLocalRoute, localRouteOptions, localRouteAlternatives } from './local-routes.js';
 import { routeMembershipReport } from './route-memberships.js';
+import { routeQuality,withRouteQuality } from './route-quality.js';
+import { routeSearchInput,namedRouteMatches,findRouteDiscovery,getRouteDiscovery,listRouteDiscoveries,queueRouteDiscovery,routeDiscoveryView } from './route-discovery.js';
 
 export function createApp(store, config = {}) {
   const app = express(); app.disable('x-powered-by');
@@ -38,6 +40,7 @@ export function createApp(store, config = {}) {
   };
   const requireAdmin = (req, res, next) => authenticated(req) ? next() : res.status(401).json({ error: 'Administrator sign-in required.' });
   const summary = f => ({ id: f.id, name: f.name, displayName: f.displayName || f.name, locationLabel: f.locationLabel, locationDescription: f.locationDescription, type: f.type, status: f.status, lengthKm: f.lengthKm, areaKm2: f.areaKm2, extentEstimate: f.extentEstimate, bbox: f.displayBbox || f.bbox,
+    ...(f.roadRoute ? {routeQuality:routeQuality(f)} : {}),
     ...(f.roadRoute?.contribution ? {localContribution:{author:f.roadRoute.contribution.author}} : {}) });
   const viewJob = job => {
     const requested = job;
@@ -46,8 +49,13 @@ export function createApp(store, config = {}) {
     return { id: job.id, query: job.query, type: job.type, status: job.status, phase: job.phase, message: job.message, created: job.created, updated: job.updated,
       ...(requested.superseded_by ? { requestedJobId: requested.id, supersededBy: job.id } : {}),
       selectionRequired: matches.length > 1, matches: matches.map(summary), feature: matches.length === 1 ?
-        (job.type==='road_route' ? matches[0] : job.feature_id ? store.feature(job.feature_id) : null) : null };
+        (job.type==='road_route' ? withRouteQuality(matches[0]) : job.feature_id ? store.feature(job.feature_id) : null) : null };
   };
+  const discoveryResult=(input,row)=>({routeSearch:{query:input.query,
+    matches:input.code?[]:namedRouteMatches(store,input,input.locality?(row?.state==='available'?row.data.records:[]):undefined).map(summary),
+    discovery:routeDiscoveryView(store,row),offer:input.code&&!input.historical&&!row?{query:input.query,label:input.label}:null,
+    message:input.historical?'Historical National Route 1 is separate from current route codes and has no mapped alignment here.':
+      input.locality?'Road and locality evidence is checked before matching saved route sections.':'Matches refer to saved route alignments, not driving directions.'}});
   const session = res => {
     const token = randomBytes(32).toString('hex');
     store.db.prepare('DELETE FROM sessions WHERE expires<?').run(Date.now());
@@ -56,6 +64,16 @@ export function createApp(store, config = {}) {
   };
   app.get('/api/config', (_req, res) => res.json({ name: 'GeoXpl', interactiveWaitMs: 5000, types: ['river', 'valley', 'national_park', 'state_forest', 'state_park', 'road_route'] }));
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
+  app.get('/api/route-discoveries',(_req,res)=>res.json(listRouteDiscoveries(store).map(r=>({id:r.id,query:r.input.query,state:r.state,updated:r.updated}))));
+  app.get('/api/route-discoveries/:id',(req,res)=>{
+    const row=getRouteDiscovery(store,req.params.id);if(!row)return res.status(404).json({error:'Route research not found.'});
+    res.json(discoveryResult(row.input,row));
+  });
+  app.post('/api/route-discoveries',rateLimit({windowMs:60000,limit:10,standardHeaders:true,legacyHeaders:false}), (req,res)=>{
+    const query=z.string().trim().min(2).max(150).parse(req.body.query);
+    try{const input=routeSearchInput(query),row=queueRouteDiscovery(store,input);res.status(['queued','running'].includes(row.state)?202:200).json(discoveryResult(input,row));}
+    catch(error){res.status(409).json({error:error.message});}
+  });
   app.get('/api/catalogue', (req, res) => {
     const status = z.enum(['resolved', 'partially_resolved', 'all']).default('resolved').parse(req.query.status);
     res.json(store.features().filter(f => status === 'all' ? ['resolved', 'partially_resolved'].includes(f.status) : f.status === status).map(summary));
@@ -63,7 +81,8 @@ export function createApp(store, config = {}) {
   app.post('/api/search', rateLimit({ windowMs: 60000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many searches. Please wait a minute.' } }), (req, res) => {
     const input = z.object({ query: z.string().trim().min(2).max(150), type: z.enum(['river', 'valley', 'national_park', 'state_forest', 'state_park', 'road_route']), confirmType: z.boolean().default(false) }).parse(req.body);
     if (input.type === 'road_route') {
-      const code = routeCode(input.query);
+      let parsed;try{parsed=routeSearchInput(input.query);}catch(e){return res.status(400).json({error:e.message});}
+      const code = parsed.code;
       const query = normalize(input.query);
       const byName = store.db.prepare("SELECT * FROM jobs WHERE type='road_route' AND normalized=? AND superseded_by IS NULL");
       const find = name => byName.get(normalize(name));
@@ -72,8 +91,13 @@ export function createApp(store, config = {}) {
       const explicitTag = /^numbered route /.test(query);
       const job = !code ? null : !numeric ? find(routeJobName(code)) : explicitTag ? find(`Numbered Route ${code}`) :
         find(`Metropolitan Route ${code}`) || (!explicitMetro && find(`Numbered Route ${code}`));
-      if (numeric && explicitMetro && !job) return res.status(404).json({ error: `Metropolitan Route ${code} has no reviewed alignment in GeoXpl yet. A matching Vicmap number alone does not identify it.` });
-      if (!job) return res.status(404).json({ error: 'This Victorian road route is not in the catalogue or import queue. Historical National Route 1 is not mapped.' });
+      if (!job) {
+        let row=findRouteDiscovery(store,parsed);
+        if(!parsed.code&&parsed.locality&&!parsed.historical&&!row) {
+          try{row=queueRouteDiscovery(store,parsed);}catch(e){return res.status(429).json({error:e.message});}
+        }
+        return res.json(discoveryResult(parsed,row));
+      }
       return res.status(job.status === 'pending' ? 202 : 200).json(viewJob(job));
     }
     if (!input.confirmType) {
@@ -92,7 +116,7 @@ export function createApp(store, config = {}) {
     res.status(job.status === 'resolved' ? 200 : 202).json(viewJob(job));
   });
   app.get('/api/jobs/:id', (req, res) => { const job = store.getJob(req.params.id); if (!job) return res.status(404).json({ error: 'Job not found.' }); res.json(viewJob(job)); });
-  app.get('/api/features/:id', (req, res) => { const f = store.feature(req.params.id); if (!f) return res.status(404).json({ error: 'Feature not found.' }); res.json(f); });
+  app.get('/api/features/:id', (req, res) => { const f = store.feature(req.params.id); if (!f) return res.status(404).json({ error: 'Feature not found.' }); res.json(withRouteQuality(f)); });
   app.get('/api/features/:id/provenance', (req, res) => {
     const { id } = req.params;
     const feature = store.feature(id);
@@ -102,7 +126,7 @@ export function createApp(store, config = {}) {
     const revision = typeof revisionId === 'string' ? store.featureRevision(id, revisionId) : null;
     if (req.query.revision !== undefined && !revision) return res.status(404).json({ error: 'Geometry revision not found.' });
     res.json({ revisions, revisionId, lineage: revision ? mappingLineage(revision) : null,
-      ...(revision?.type==='road_route' ? {routeMemberships:routeMembershipReport(store.db,id,revisionId)} : {}) });
+      ...(revision?.type==='road_route' ? {routeQuality:routeQuality(revision),routeMemberships:routeMembershipReport(store.db,id,revisionId)} : {}) });
   });
   app.get('/api/admin/session', (req, res) => res.json({ authenticated: authenticated(req), setupRequired: !store.setting('password'), localSetup: config.localSetup !== false }));
   const loginLimit = rateLimit({ windowMs: 60000, limit: 8, message: { error: 'Too many sign-in attempts. Wait a minute.' } });
@@ -123,6 +147,11 @@ export function createApp(store, config = {}) {
   });
   app.post('/api/admin/logout', requireAdmin, (req, res) => { const token = tokenFrom(req); store.db.prepare('DELETE FROM sessions WHERE token=?').run(createHash('sha256').update(token).digest('hex')); res.clearCookie('geoxpl_session', { path: '/' }); res.json({ ok: true }); });
   app.use('/api/admin', requireAdmin);
+  app.get('/api/admin/route-discoveries',(_req,res)=>res.json(listRouteDiscoveries(store).map(row=>routeDiscoveryView(store,row,{history:true}))));
+  app.post('/api/admin/route-discoveries/:id/retry',(req,res)=>{
+    const row=getRouteDiscovery(store,req.params.id);if(!row)return res.status(404).json({error:'Route research not found.'});
+    try{res.json(queueRouteDiscovery(store,row.input,{retry:true}));}catch(e){res.status(409).json({error:e.message});}
+  });
   const contributionBoundary = () => config.boundary || JSON.parse(readFileSync(new URL('../public/victoria.geojson', import.meta.url)));
   const localOperation = fn => async (req, res) => {
     try { res.json(await fn(req)); }

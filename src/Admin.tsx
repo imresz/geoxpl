@@ -5,6 +5,7 @@ import { api, statusLabel } from './api';
 import { Brand } from './App';
 import { ResearchReport } from './ResearchReport';
 import './research-followup.css';
+import { RouteResearchAdmin } from './RouteResearchAdmin';
 
 const blankSource = { name: '', type: 'river', format: 'arcgis', url: '', nameField: 'name', idField: 'OBJECTID', licence: '', attribution: '', version: '', completeness: 'unknown', aliases: [] as string[], notes: '', status: 'pending' };
 const date = (s: string) => new Date(s).toLocaleString();
@@ -108,6 +109,7 @@ export function Admin() {
         <details className="followup-group"><summary>No immediate action ({updates.length})</summary>
           {updates.length ? updates.map(followupRow) : <p className="muted">No other current reports.</p>}
         </details>
+        <RouteResearchAdmin/>
         <details className="followup-group"><summary>Report history ({history.length})</summary>
           <div className="report-list">{history.map(({ report, job, latest }) => <button key={report.id} onClick={() => setReport(report)}>
             <FileSearch size={18}/><span><strong>{job?.query || 'Research report'}</strong><small>{date(report.created)}</small></span>

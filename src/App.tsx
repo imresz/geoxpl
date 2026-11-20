@@ -7,6 +7,8 @@ import { api, statusLabel, featureLabel, type Job, type Feature, type FeatureSum
 import { Admin } from './Admin';
 import { evidencePilotKind, hasMappingHistory, MappingHistory } from './MappingHistory';
 import './catalogue.css';
+import { RouteQuality,routeQualityOf,RouteSearchResults } from './RouteSearch';
+import type { RouteSearchData } from './api';
 
 export function Brand() { return <a className="brand" href="/"><span className="brand-symbol"><Compass size={23}/></span><span>Geo<span className="brand-accent">Xpl</span></span></a>; }
 const FeatureIcon = ({type}:{type:string}) => type==='road_route'?<Route size={20}/>:type==='river'?<Waves size={20}/>:['national_park','state_forest','state_park'].includes(type)?<Trees size={20}/>:<Mountain size={20}/>;
@@ -17,6 +19,8 @@ export function App() {
   const [query, setQuery] = useState(''), [type, setType] = useState(''), [job, setJob] = useState<Job | null>(null), [waiting, setWaiting] = useState(false), [error, setError] = useState('');
   const [selected, setSelected] = useState<Feature | null>(null), [tab, setTab] = useState('explore'), [catalogue, setCatalogue] = useState<FeatureSummary[]>([]), [elapsed, setElapsed] = useState(0);
   const [loadingFeature, setLoadingFeature] = useState<string | null>(null);
+  const [routeSearch,setRouteSearch]=useState<RouteSearchData|null>(null);
+  const [routeResearch,setRouteResearch]=useState<{id:string;query:string;state:string}[]>([]);
   const [typePrompt, setTypePrompt] = useState<{ input: SearchInput; alternatives: SearchAlternative[] } | null>(null);
   const [catalogueType,setCatalogueType]=useState('all');
   const visibleCatalogue=catalogue.filter(f=>catalogueType==='all'||f.type===catalogueType);
@@ -31,8 +35,16 @@ export function App() {
   const [reviewFocus, setReviewFocus] = useState<[number, number] | null>(null);
   useEffect(() => { setShowNetwork(false); setShowFloor(false); setFocusedEstimate(null); setReviewFocus(null); }, [selected]);
   const displayedFeature = useMemo(() => selected && showNetwork && selected.recordedNetwork ? { ...selected, geometry: selected.recordedNetwork.geometry, bbox: selected.recordedNetwork.bbox, displayBbox: selected.recordedNetwork.bbox, interpolations: undefined } : selected && showFloor && selected.valleyFloor ? { ...selected, ...selected.valleyFloor, displayBbox: selected.valleyFloor.bbox } : selected, [selected, showNetwork, showFloor]);
-  const refreshCatalogue = () => api<FeatureSummary[]>('/catalogue?status=all').then(setCatalogue).catch(() => {});
+  const refreshCatalogue = () => { api<FeatureSummary[]>('/catalogue?status=all').then(setCatalogue).catch(() => {});api('/route-discoveries').then(setRouteResearch).catch(()=>{}); };
   useEffect(() => { refreshCatalogue(); return () => active.current?.abort(); }, []);
+  useEffect(()=>{
+    const id=new URLSearchParams(location.search).get('routeResearch');if(!id)return;
+    const controller=new AbortController();
+    api<{routeSearch:RouteSearchData}>(`/route-discoveries/${encodeURIComponent(id)}`,'GET',undefined,controller.signal).then(r=>{
+      if(!controller.signal.aborted){setRouteSearch(r.routeSearch);setQuery(r.routeSearch.query);setType('road_route');}
+    }).catch(e=>{if(!controller.signal.aborted)setError(e.message);});
+    return()=>controller.abort();
+  },[]);
   useEffect(() => {
     const id = new URLSearchParams(location.search).get('job');
     if (!id) return;
@@ -50,7 +62,7 @@ export function App() {
     setError(''); setTypePrompt(null); setLoadingFeature(id); setWaiting(false);
     try {
       const feature = await api<Feature>(`/features/${id}`, 'GET', undefined, controller.signal);
-      if (!controller.signal.aborted) { setSelected(feature); setTab('explore'); if (fromCatalogue) setJob(null); }
+      if (!controller.signal.aborted) { setSelected(feature); setTab('explore'); if (fromCatalogue) {setJob(null);setRouteSearch(null);} }
     } catch (e) { if (!controller.signal.aborted) setError((e as Error).message); }
     finally { if (active.current === controller) setLoadingFeature(null); }
   }
@@ -58,14 +70,15 @@ export function App() {
     event?.preventDefault();
     const input = requested || { query, type }; if (!input.query.trim() || !input.type) return;
     active.current?.abort(); const controller = new AbortController(); active.current = controller;
-    setError(''); setTypePrompt(null); setJob(null); setSelected(null); setLoadingFeature(null); setWaiting(true); setTab('explore'); setElapsed(0);
+    setError(''); setTypePrompt(null); setRouteSearch(null); setJob(null); setSelected(null); setLoadingFeature(null); setWaiting(true); setTab('explore'); setElapsed(0);
     const start = performance.now();
     const timeout = window.setTimeout(() => controller.abort('budget'), 5000);
     const clock = window.setInterval(() => setElapsed(Math.min(5, (performance.now() - start) / 1000)), 100);
     try {
-      const response = await api<Job | { alternatives: SearchAlternative[] }>('/search', 'POST', input, controller.signal);
+      const response = await api<Job | { alternatives: SearchAlternative[] } | {routeSearch:RouteSearchData}>('/search', 'POST', input, controller.signal);
       if (controller.signal.aborted) return;
       if ('alternatives' in response) { setTypePrompt({ input, alternatives: response.alternatives }); return; }
+      if ('routeSearch' in response) { setRouteSearch(response.routeSearch);return; }
       let current = response; setJob(current);
       while (current.status === 'pending' && performance.now() - start < 4900) {
         await new Promise(resolve => setTimeout(resolve, 450));
@@ -93,10 +106,11 @@ export function App() {
           {catalogue.length ? [{status:'resolved',title:'Resolved'},{status:'partially_resolved',title:'Partially resolved'}].map(group => {
             const features = visibleCatalogue.filter(f => f.status === group.status).sort((a,b) => featureLabel(a).localeCompare(featureLabel(b)));
             return <section className="catalogue-group" key={group.status} aria-label={`${group.title} features`}><h2>{group.title}<span className={`badge ${group.status === 'resolved' ? 'green' : 'amber'}`}>{features.length}</span></h2>
-              <div className="catalogue-list">{features.map(f => <button key={f.id} disabled={!!loadingFeature} onClick={() => selectFeature(f.id, true)}><FeatureIcon type={f.type}/><span><strong>{featureLabel(f)}</strong><small>{statusLabel(f.type)} · {f.type === 'road_route' ? f.localContribution ? 'Local contribution (unverified)' : 'Victorian snapshot' : f.lengthKm != null ? `${f.lengthKm.toFixed(1)} km` : f.areaKm2 != null ? `${f.areaKm2.toFixed(1)} km²${f.extentEstimate ? ' estimated' : ''}` : 'Measurement unavailable'}</small>{f.extentEstimate && <small>{f.extentEstimate.label}</small>}</span>{loadingFeature === f.id ? <LoaderCircle className="spin" size={16}/> : <ArrowUpRight size={16}/>}</button>)}</div>
+              <div className="catalogue-list">{features.map(f => <button key={f.id} disabled={!!loadingFeature} onClick={() => selectFeature(f.id, true)}><FeatureIcon type={f.type}/><span><strong>{featureLabel(f)}</strong><small>{statusLabel(f.type)} · {f.type === 'road_route' ? routeQualityOf(f)?.coverage.label : f.lengthKm != null ? `${f.lengthKm.toFixed(1)} km` : f.areaKm2 != null ? `${f.areaKm2.toFixed(1)} km²${f.extentEstimate ? ' estimated' : ''}` : 'Measurement unavailable'}</small>{f.type==='road_route'&&<small>{routeQualityOf(f)?.designation.label}</small>}{f.extentEstimate && <small>{f.extentEstimate.label}</small>}</span>{loadingFeature === f.id ? <LoaderCircle className="spin" size={16}/> : <ArrowUpRight size={16}/>}</button>)}</div>
               {!features.length && <p className="muted small">No {group.title.toLowerCase()} features yet.</p>}
             </section>;
           }) : <div className="empty-state"><Database size={30}/><h2>No processed features yet</h2><p>Saved features will appear here.</p></div>}
+          {['all','road_route'].includes(catalogueType)&&routeResearch.length>0&&<section className="catalogue-group"><h2>Route research <span className="badge">{routeResearch.length}</span></h2><div className="catalogue-list">{routeResearch.map(r=><button key={r.id} onClick={()=>{setQuery(r.query);setType('road_route');void search(undefined,{query:r.query,type:'road_route'});}}><Route size={18}/><span><strong>{r.query}</strong><small>{statusLabel(r.state)} · no published extent</small></span><ArrowUpRight size={16}/></button>)}</div></section>}
         </> : typePrompt && typePrompt.input.query === query && typePrompt.input.type === type ? <section className="detail-section" aria-labelledby="type-prompt-title">
           <h2 id="type-prompt-title">Check the name or feature type</h2>
           <p role="status">You entered “{typePrompt.input.query.trim()}” and selected {typeLabel(typePrompt.input.type)}.</p>
@@ -107,7 +121,7 @@ export function App() {
         </section> : selected ? <>
           <button className="text-button back" onClick={() => { setSelected(null); if (!job?.selectionRequired) setJob(null); }}><ArrowLeft size={15}/>{job?.selectionRequired ? 'Matching features' : 'Overview'}</button>
           <div className="feature-type"><FeatureIcon type={selected.type}/> {statusLabel(selected.type)}</div>
-          <h1 className="feature-name">{featureLabel(selected)}</h1><span className={`badge ${selected.status === 'resolved' ? 'green' : 'amber'}`}>{statusLabel(selected.status)}</span>
+          <h1 className="feature-name">{featureLabel(selected)}</h1>{selected.roadRoute?<RouteQuality quality={routeQualityOf(selected)}/>:<span className={`badge ${selected.status === 'resolved' ? 'green' : 'amber'}`}>{statusLabel(selected.status)}</span>}
           {selected.recordedNetwork && <div className="geometry-modes" role="group" aria-label="River geometry"><button aria-pressed={!showNetwork} onClick={() => setShowNetwork(false)}>Main-stem candidate</button><button aria-pressed={showNetwork} onClick={() => setShowNetwork(true)}>Named network</button></div>}
           {selected.valleyFloor && <div className="geometry-modes" role="group" aria-label="Valley geometry"><button aria-pressed={!showFloor} onClick={() => setShowFloor(false)}>Terrain extent</button><button aria-pressed={showFloor} onClick={() => setShowFloor(true)}>Valley floor</button></div>}
           {!evidencePilot && displayedFeature?.extentEstimate && <div className="detail-section"><h2>{displayedFeature.extentEstimate.label}</h2><p className="muted small">{displayedFeature.extentEstimate.scopeNote}</p><a className="source-link" href={displayedFeature.extentEstimate.evidenceUrl} target="_blank" rel="noreferrer">Geographic context<ArrowUpRight size={16}/></a></div>}
@@ -128,7 +142,7 @@ export function App() {
             <MappingHistory key={`${selected.id}:${selected.created}`} featureId={selected.id} onLocate={point => setReviewFocus([...point])}/>
           </details> : hasMappingHistory(selected) && <div className="detail-section"><h2>How this was mapped</h2><MappingHistory key={`${selected.id}:${selected.created}`} featureId={selected.id}/></div>}
           {!evidencePilot && <div className="detail-section"><h2>Provenance</h2>{selected.evidence.filter((e, i, all) => all.findIndex(other => other.sourceId === e.sourceId) === i).map(e => <a key={e.sourceId} className="source-link" href={e.sourceUrl} target="_blank" rel="noreferrer"><span>{e.sourceName}<small>{e.licence}</small>{selected.extentEstimate && <small>{e.attribution}</small>}</span><ArrowUpRight size={16}/></a>)}<dl><dt>Source records</dt><dd>{selected.evidence.length}</dd><dt>Method</dt><dd>{selected.method.replaceAll('_', ' ')}</dd><dt>Processed</dt><dd>{new Date(selected.created).toLocaleDateString()}</dd></dl><details><summary>Processing evidence</summary><pre>{JSON.stringify({ id: selected.id, algorithm: selected.algorithmVersion, extentEstimate: selected.extentEstimate, principalDrainage: selected.principalDrainage, terrain: selected.terrain, identity: selected.identity, selection: selected.selection, mainStem: selected.mainStem, source: selected.source, mouth: selected.mouth, evidence: selected.evidence, interpolations: selected.interpolations, interpolationSummary: selected.interpolationSummary }, null, 2)}</pre></details></div>}
-        </> : job?.selectionRequired && !waiting ? <section className="matching-features" aria-label="Matching features">
+        </> : routeSearch&&!waiting?<RouteSearchResults key={JSON.stringify(routeSearch)} initial={routeSearch} loading={!!loadingFeature} onSelect={id=>void selectFeature(id)} onSearch={q=>{setQuery(q);setType('road_route');void search(undefined,{query:q,type:'road_route'});}}/>:job?.selectionRequired && !waiting ? <section className="matching-features" aria-label="Matching features">
           <div className="panel-title"><h1>{job.query}</h1></div>
           <p className="muted small" role="status">{job.type==='road_route' ? `${job.matches.length} available alignments. Choose one.` : `${job.matches.length} matching features. Choose a location.`}</p>
           <div className="catalogue-list">{job.matches.map(f => <button key={f.id} disabled={!!loadingFeature} onClick={() => selectFeature(f.id)}><FeatureIcon type={f.type}/><span><strong>{featureLabel(f)}</strong><small>{f.locationDescription}</small><small>{f.type==='road_route' ? f.localContribution ? `Local contribution · ${f.localContribution.author} · unverified` : 'Existing catalogue alignment' : f.lengthKm != null ? `${f.lengthKm.toFixed(1)} km recorded` : f.areaKm2 != null ? `${f.areaKm2.toFixed(1)} km² recorded` : 'Measurement unavailable'}</small><span className={`badge ${f.status === 'resolved' ? 'green' : 'amber'}`}>{statusLabel(f.status)}</span></span>{loadingFeature === f.id ? <LoaderCircle className="spin" size={16}/> : <ArrowUpRight size={16}/>}</button>)}</div>

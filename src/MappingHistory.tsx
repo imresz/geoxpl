@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { api, statusLabel, type Feature, type MetroReview, type ExtentEstimate } from './api';
 import { MetroRouteReview } from './MetroRouteReview';
 import { RouteMemberships, type RouteMembershipReport } from './RouteMemberships';
+import { RouteQuality } from './RouteSearch';
+import type { RouteQualityData } from './api';
 
 type Evidence = {
   sourceName?: string; sourceUrl?: string; sourceVersion?: string; attribution?: string;
@@ -11,6 +13,7 @@ type History = {
   revisions: { id: string; created: string }[];
   revisionId?: string;
   routeMemberships?: RouteMembershipReport;
+  routeQuality?: RouteQualityData;
   lineage: {
     method?: string; description?: string; processorVersion?: string; status?: string; geometryType?: string;
     limitations: string[]; evidence?: Evidence[];
@@ -69,6 +72,7 @@ export function MappingHistory({ featureId, onLocate }: { featureId: string; onL
       : <>
         {history?.revisions[0].id !== history?.revisionId && <p className="muted small">Earlier revision. The map still shows the current geometry.</p>}
         <p>{lineage.description || lineage.method?.replaceAll('_', ' ') || 'Processing method not recorded.'}</p>
+        <RouteQuality quality={history?.routeQuality} details/>
         {history?.routeMemberships&&<RouteMemberships key={history.revisionId} report={history.routeMemberships}
           onLocate={history.revisions[0].id===history.revisionId ? onLocate : undefined}/>}
         {lineage.contribution && <section className="detail-section"><h3>Local contribution</h3>

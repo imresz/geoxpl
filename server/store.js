@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { indexRouteRevision } from './route-memberships.js';
+import { createRouteDiscoveryTables,backfillRouteNames,indexRouteNames } from './route-discovery.js';
 
 export const normalize = value => value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-AU');
 export function featureSearchTerms(query, type, aliases = []) {
@@ -56,6 +57,8 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
       ALTER TABLE features_many RENAME TO features;
       COMMIT;`);
   }
+  createRouteDiscoveryTables(db);
+  backfillRouteNames(db);
   const getJob = id => db.prepare('SELECT * FROM jobs WHERE id=?').get(id);
   const currentJob = id => {
     let job = getJob(id);
@@ -161,6 +164,7 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
           const revisionId=randomUUID();
           db.prepare('INSERT INTO derivations VALUES(?,?,?,?)').run(revisionId, id, JSON.stringify(result), now());
           indexRouteRevision(db,revisionId);
+          indexRouteNames(db,revisionId);
           db.prepare('INSERT INTO features(id,job_id,identity_key,active,data,created) VALUES(?,?,?,1,?,?) ON CONFLICT(id) DO UPDATE SET identity_key=excluded.identity_key,active=1,data=excluded.data').run(id, job.id, key, JSON.stringify(result), now());
           return result;
         });

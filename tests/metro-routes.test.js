@@ -52,7 +52,9 @@ test('partial metropolitan routes are searchable and listed without creating a h
     assert.equal((await match.json()).feature.id, feature.id);
     const catalogue = await (await fetch(`${root}/catalogue?status=partially_resolved`)).json();
     assert.equal(catalogue[0].id, feature.id);
-    assert.equal((await search('National Route 1')).status, 404);
+    const historical=await (await search('National Route 1')).json();
+    assert.equal(historical.routeSearch.offer,null);
+    assert.deepEqual(historical.routeSearch.matches,[]);
     assert.equal(store.jobs().length, 1);
   } finally {
     await new Promise(resolve => server.close(resolve));

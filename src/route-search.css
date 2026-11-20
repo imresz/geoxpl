@@ -1,0 +1,8 @@
+.route-quality { margin: 14px 0; border-top: 1px solid var(--line, #dce1df); border-bottom: 1px solid var(--line, #dce1df); }
+.route-quality dl { margin: 12px 0; }
+.route-records { padding-left: 18px; }
+.route-records li { margin: 14px 0; overflow-wrap: anywhere; }
+.route-records small { display: block; margin-top: 4px; color: var(--muted, #65716d); }
+.route-records dl div { display: contents; }
+.route-records dd { overflow-wrap: anywhere; }
+.route-checksum { display: block; overflow-wrap: anywhere; font-size: 11px; }

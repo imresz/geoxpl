@@ -7,10 +7,13 @@ import { drainageFingerprint, eligibleValleyDrainage } from './valley-floor.js';
 import { runInvestigation } from './report-workflow.js';
 import { selectSources } from './source-selection.js';
 import { runRoadRouteJob } from './road-route-batch.js';
+import { runRouteDiscovery } from './route-discovery.js';
+import { readFileSync } from 'node:fs';
 
 export function createWorker(store, options = {}) {
   const importer = options.importer || importSource, researcher = options.researcher || research;
   let busy = false, stopped = false;
+  store.db.prepare("UPDATE route_discoveries SET state='queued' WHERE state='running'").run();
   store.db.prepare("UPDATE jobs SET phase='queued',message='Resuming interrupted processing' WHERE status='pending' AND phase IN ('importing','processing','researching')").run();
   store.db.prepare("UPDATE report_actions SET status='queued' WHERE kind='investigate' AND status='running'").run();
   async function run(job) {
@@ -156,6 +159,16 @@ export function createWorker(store, options = {}) {
   }
   async function tick() {
     if (busy || stopped) return;
+    const discovery=store.db.prepare("SELECT id FROM route_discoveries WHERE state='queued' ORDER BY created LIMIT 1").get();
+    if(discovery) {
+      const recent=store.db.prepare("SELECT COUNT(*) AS n FROM route_discovery_revisions WHERE created>? AND json_extract(data,'$.state')='running'").get(new Date(Date.now()-3600000).toISOString()).n;
+      if(recent<10) {
+        busy=true;
+        try{await runRouteDiscovery(store,discovery.id,{load:options.routeDiscoveryLoader,boundary:options.boundary||JSON.parse(readFileSync(new URL('../public/victoria.geojson',import.meta.url)))});}
+        finally{busy=false;}
+        return;
+      }
+    }
     const investigation = store.db.prepare("SELECT id FROM report_actions WHERE kind='investigate' AND status='queued' ORDER BY created,id LIMIT 1").get();
     if (investigation) {
       busy = true;
