@@ -61,7 +61,7 @@ test('stale drafts, source revocation, foreign segment refs and unsupported code
     saveLocalRoute(store,'20',body(roads));
     assert.throws(()=>saveLocalRoute(store,'22',body(roads)),/does not belong/);
     assert.throws(()=>saveLocalRoute(store,'20',body(roads)),/changed/);
-    assert.throws(()=>saveLocalRoute(store,'24',body(roads)));
+    assert.throws(()=>saveLocalRoute(store,'National Route 1',body(roads)));
     assert.throws(()=>saveLocalRoute(store,'20',body(roads,{version:1,observedAt:'2026-02-30'})),/valid date/);
     const old=previewLocalRoute(store,'20',boundary);
     const saved=saveLocalRoute(store,'20',body(roads,{version:1,statement:'An updated independent observation.'}));
@@ -86,8 +86,9 @@ test('disconnected selections stay partial and unsafe or excessive road requests
     const existing=store.request('Metropolitan Route 22','road_route');
     store.saveFeature(existing,{identityKey:'published-official',status:'resolved',evidence:[]});
     const p=previewLocalRoute(store,'22',boundary);
-    assert.throws(()=>publishLocalRoute(store,'22',{version:p.version,checksum:p.checksum,confirmed:true},boundary),/different alignment/);
-    assert.equal(store.features()[0].identityKey,'published-official');
+    const alternative=publishLocalRoute(store,'22',{version:p.version,checksum:p.checksum,confirmed:true},boundary);
+    assert.notEqual(alternative.jobId,existing.id);
+    assert.equal(store.jobFeatures(existing.id)[0].identityKey,'published-official');
   }finally{store.close();}
 });
 
@@ -103,7 +104,7 @@ test('in-flight processing cannot race a publication and withdrawal cannot remov
     publishLocalRoute(store,'20',input,boundary);
     const local=localRouteView(store,'20');
     store.saveFeature(job,{identityKey:'replacement-official',status:'resolved',evidence:[]});
-    assert.throws(()=>withdrawLocalRoute(store,'20',{version:local.version,reason:'Test withdrawal.'}),/active result changed/);
+    assert.equal(withdrawLocalRoute(store,'20',{version:local.version,reason:'Test withdrawal.'}).state,'withdrawn');
     assert.equal(store.features()[0].identityKey,'replacement-official');
   }finally{store.close();}
 });

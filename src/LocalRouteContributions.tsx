@@ -1,28 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
-import { Eye, LoaderCircle, MapPin, RotateCcw, Save, Upload } from 'lucide-react';
+import { ArrowRight, Eye, LoaderCircle, MapPin, Plus, RotateCcw, Save, Search, Upload } from 'lucide-react';
 import { api } from './api';
 import './local-contributions.css';
 
 type SectionEvidence={statement:string;uncertainty:string;links:string[]};
 type Road = GeoJSON.Feature<GeoJSON.LineString, { pfi:number; ezi_road_name_label?:string; ezi_road_name?:string }> & { id:string; snapshotId:string;membership?:SectionEvidence };
 type Form = { author:string; basis:string; observedAt:string; statement:string; uncertainty:string; links:string; segments:Road[] };
+type RouteOption={id:string;code:string;scheme:string;label:string;bbox:[number,number,number,number]|null;hasAlignment:boolean;hasSavedRoads:boolean};
 const empty = ():Form => ({author:'',basis:'local_knowledge',observedAt:'',statement:'',uncertainty:'',links:'',segments:[]});
 const overview:Record<string,[number,number,number,number]> = {
   '20':[144.95,-37.86,145.13,-37.80], '22':[144.99,-37.94,145.32,-37.85]
 };
 
-function ContributionMap({code,roads,selected,preview,onToggle,onBounds}: {
-  code:string; roads:Road[]; selected:Road[]; preview:any;
+function ContributionMap({code,extent,roads,selected,preview,onToggle,onBounds}: {
+  code:string; extent:[number,number,number,number];roads:Road[]; selected:Road[]; preview:any;
   onToggle:(road:Road)=>void; onBounds:(bounds:number[])=>void;
 }) {
   const element=useRef<HTMLDivElement>(null), map=useRef<maplibregl.Map|null>(null);
   const [loaded,setLoaded]=useState(false),[error,setError]=useState('');
   const callbacks=useRef({roads,onToggle,onBounds});
+  const extentKey=extent.join(',');
   callbacks.current={roads,onToggle,onBounds};
   useEffect(()=>{
     if(!element.current)return;
-    const m=new maplibregl.Map({container:element.current,bounds:overview[code],fitBoundsOptions:{padding:35},attributionControl:{compact:true},
+    const m=new maplibregl.Map({container:element.current,bounds:extent,fitBoundsOptions:{padding:35},attributionControl:{compact:true},
       style:{version:8,sources:{osm:{type:'raster',tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],tileSize:256,
         attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> · Vicmap Transport © State of Victoria (CC BY 4.0)'}},
         layers:[{id:'basemap',type:'raster',source:'osm'}]}});
@@ -44,7 +46,7 @@ function ContributionMap({code,roads,selected,preview,onToggle,onBounds}: {
     m.on('error',()=>setError('Some map tiles could not load.'));
     const observer=new ResizeObserver(()=>m.resize());observer.observe(element.current);
     return ()=>{observer.disconnect();m.remove();map.current=null;setLoaded(false);};
-  },[code]);
+  },[code,extentKey]);
   useEffect(()=>{
     const m=map.current;if(!m||!loaded)return;
     for(const [id,features] of [['roads',roads],['selected',selected]] as const){
@@ -64,17 +66,33 @@ function ContributionMap({code,roads,selected,preview,onToggle,onBounds}: {
 
 export function LocalRouteContributions() {
   const [code,setCode]=useState('20'),[form,setForm]=useState<Form>(empty),[saved,setSaved]=useState<any>(null),[preview,setPreview]=useState<any>(null);
+  const [options,setOptions]=useState<RouteOption[]>([{id:'20',code:'20',scheme:'metropolitan',label:'Metropolitan Route 20',bbox:null,hasAlignment:false,hasSavedRoads:false},
+    {id:'22',code:'22',scheme:'metropolitan',label:'Metropolitan Route 22',bbox:null,hasAlignment:false,hasSavedRoads:false}]);
+  const [filter,setFilter]=useState(''),[newRoute,setNewRoute]=useState(false),[newScheme,setNewScheme]=useState('metropolitan'),[newCode,setNewCode]=useState('');
+  const [origin,setOrigin]=useState('live');
   const [roads,setRoads]=useState<Road[]>([]),[bounds,setBounds]=useState<number[]>([]),[dirty,setDirty]=useState(false);
   const [busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [confirmed,setConfirmed]=useState(false),[reason,setReason]=useState('');
   const locked=saved?.state==='published';
+  const refreshOptions=()=>{void api<RouteOption[]>('/admin/local-routes').then(setOptions).catch(()=>{});};
+  const option=options.find(r=>r.id===code);
+  const routePath=`/admin/local-routes/${encodeURIComponent(code)}`;
+  const extent=option?.bbox || overview[code] || [140.9,-39.3,150.1,-34.0] as [number,number,number,number];
+  useEffect(()=>{
+    const controller=new AbortController();
+    api<RouteOption[]>('/admin/local-routes','GET',undefined,controller.signal).then(data=>{
+      if(!controller.signal.aborted)setOptions(data);
+    }).catch(e=>{if(!controller.signal.aborted)setError(e.message);});
+    return ()=>controller.abort();
+  },[]);
+  useEffect(()=>setOrigin(option?.hasSavedRoads?'catalogue':'live'),[code,option?.hasSavedRoads]);
   const adopt=(data:any)=>{
     setSaved(data);setForm(data?{...data.data,links:data.data.links.join('\n'),segments:data.selected}:empty());
     setDirty(false);setPreview(null);setConfirmed(false);
   };
   useEffect(()=>{
     const controller=new AbortController();setLoading(true);setError('');setRoads([]);setNotice('');setBounds([]);
-    api(`/admin/local-routes/${code}`,'GET',undefined,controller.signal).then(data=>{
+    api(routePath,'GET',undefined,controller.signal).then(data=>{
       if(!controller.signal.aborted)adopt(data);
     }).catch(e=>{if(!controller.signal.aborted)setError(e.message);}).finally(()=>{if(!controller.signal.aborted)setLoading(false);});
     return ()=>controller.abort();
@@ -88,34 +106,50 @@ export function LocalRouteContributions() {
     {...r,membership:{statement:'',uncertainty:'',links:[],...r.membership,...change}} : r)});
   const act=async(fn:()=>Promise<void>)=>{setBusy(true);setError('');setNotice('');try{await fn();}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
   const loadRoads=()=>act(async()=>{
-    const data=await api(`/admin/local-routes/${code}/roads`,'POST',{bounds});
-    setRoads(data.features.map((f:any)=>({...f,snapshotId:data.id})));setNotice(`${data.features.length} Vicmap road segments loaded.`);
+    const data=await api(`${routePath}/roads`,'POST',{bounds,origin});
+    setRoads(data.features.map((f:any)=>({...f,snapshotId:f.snapshotId || data.id})));
+    setNotice(`${data.features.length} road segments loaded from ${origin==='catalogue'?'retained alignment inputs':'Vicmap'}.${data.omitted?` ${data.omitted} records outside Victoria excluded.`:''}${data.sourceVersions?.length?` Source versions: ${data.sourceVersions.join(', ')}.`:''}`);
   });
   const closeView=bounds.length===4&&bounds[2]-bounds[0]<=.045&&bounds[3]-bounds[1]<=.035;
   const save=()=>act(async()=>{
-    const value=await api(`/admin/local-routes/${code}`,'PUT',{
+    const value=await api(routePath,'PUT',{
       ...form,version:saved?.version||0,links:form.links.split('\n').map(x=>x.trim()).filter(Boolean),
       segments:form.segments.map(r=>({snapshotId:r.snapshotId,recordId:r.id,...(r.membership ? {membership:{...r.membership,
         links:r.membership.links.map(x=>x.trim()).filter(Boolean)}} : {})}))
     });
     adopt(value);
-    setPreview(await api(`/admin/local-routes/${code}/preview`,'POST',{}));
+    setPreview(await api(`${routePath}/preview`,'POST',{}));
     setNotice('Draft saved. Preview is not public.');
   });
-  const review=()=>act(async()=>{setPreview(await api(`/admin/local-routes/${code}/preview`,'POST',{}));});
+  const review=()=>act(async()=>{setPreview(await api(`${routePath}/preview`,'POST',{}));});
   const publish=()=>act(async()=>{
-    const value=await api(`/admin/local-routes/${code}/publish`,'POST',{version:preview.version,checksum:preview.checksum,confirmed:true});
-    adopt(value);setNotice('Published as a partially resolved local contribution.');
+    const alternative=preview.publication?.mode==='alternative';
+    const value=await api(`${routePath}/publish`,'POST',{version:preview.version,checksum:preview.checksum,confirmed:true});
+    adopt(value);refreshOptions();setNotice(alternative?'Local candidate published separately. Existing alignment retained.':'Published as a partially resolved local contribution.');
   });
   const withdraw=()=>act(async()=>{
-    const value=await api(`/admin/local-routes/${code}/withdraw`,'POST',{version:saved.version,reason});
-    adopt(value);setReason('');setNotice('Publication withdrawn. Draft and archived revisions retained.');
+    const value=await api(`${routePath}/withdraw`,'POST',{version:saved.version,reason});
+    adopt(value);refreshOptions();setReason('');setNotice('Publication withdrawn. Draft and archived revisions retained.');
   });
   return <section className="local-contributions">
     <div className="section-heading"><h2>Local route contributions</h2>
-      <select aria-label="Contribution route" value={code} disabled={busy} onChange={e=>{
-        if(!dirty||window.confirm('Discard unsaved changes to this contribution?'))setCode(e.target.value);
-      }}><option value="20">Metropolitan Route 20</option><option value="22">Metropolitan Route 22</option></select></div>
+      <div className="contribution-route-picker">
+        <label className="contribution-filter"><Search size={16}/><input type="search" aria-label="Filter contribution routes" placeholder="Route code" value={filter} onChange={e=>setFilter(e.target.value)}/></label>
+        <select aria-label="Contribution route" value={code} disabled={busy} onChange={e=>{
+          if(!dirty||window.confirm('Discard unsaved changes to this contribution?'))setCode(e.target.value);
+        }}>{options.filter(r=>r.id===code||r.label.toLowerCase().includes(filter.trim().toLowerCase())).map(r=><option key={r.id} value={r.id}>{r.label}{r.scheme==='unconfirmed_numeric'?' (scheme unconfirmed)':''}</option>)}</select>
+        <button type="button" className="contribution-add" aria-label="Add route" title="Add a route to the contribution editor" disabled={busy} aria-expanded={newRoute} onClick={()=>setNewRoute(!newRoute)}><Plus size={18}/></button>
+      </div></div>
+    {newRoute&&<form className="contribution-new-route" onSubmit={event=>{
+      event.preventDefault();const value=newCode.trim().toUpperCase(),alpha=newScheme==='alphanumeric';
+      if(!(alpha?/^[MABC][0-9]{1,3}$/:/^[1-9][0-9]?$/).test(value)){setError(alpha?'Enter an M, A, B or C route code with up to three digits.':'Enter a route number from 1 to 99.');return;}
+      const id=newScheme==='unconfirmed_numeric'?`numbered:${value}`:value;
+      if(id!==code&&dirty&&!window.confirm('Discard unsaved changes to this contribution?'))return;
+      const label=alpha?value:`${newScheme==='metropolitan'?'Metropolitan':'Numbered'} Route ${value}`;
+      setOptions(current=>current.some(r=>r.id===id)?current:[...current,{id,code:value,scheme:newScheme,label,bbox:null,hasAlignment:false,hasSavedRoads:false}]);
+      setCode(id);setFilter('');setNewCode('');setNewRoute(false);
+    }}><label>Numbering scheme<select value={newScheme} onChange={e=>setNewScheme(e.target.value)}><option value="metropolitan">Metropolitan / state route</option><option value="alphanumeric">M / A / B / C route</option><option value="unconfirmed_numeric">Numeric tag (scheme unconfirmed)</option></select></label>
+      <label>Route code<input required maxLength={4} value={newCode} onChange={e=>setNewCode(e.target.value)}/></label><button type="submit" className="secondary"><ArrowRight size={16}/>Open draft</button></form>}
     {error&&<p role="alert" className="error">{error}</p>}{notice&&<p role="status" className="warning">{notice}</p>}
     {loading?<p><LoaderCircle className="spin" size={16}/>Loading draft</p>:<div className="contribution-layout">
       <form className="contribution-form" onSubmit={event=>{event.preventDefault();void save();}}>
@@ -132,6 +166,7 @@ export function LocalRouteContributions() {
           {saved&&!dirty&&<button type="button" className="secondary" disabled={busy} onClick={review}><Eye size={16}/>Preview saved draft</button>}
         </div>
         {!locked&&preview&&!dirty&&<>
+          {preview.publication?.mode==='alternative'&&<p className="small">The existing catalogue alignment will be retained as a separate result.</p>}
           <p className="small">{preview.feature.roadRoute.segments} segments · {preview.feature.roadRoute.components} connected groups</p>
           {preview.feature.warnings.map((note:string)=><p className="small muted" key={note}>{note}</p>)}
           <label className="check-row"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>Publish my contributor name, notes and links with this unverified alignment.</label>
@@ -145,7 +180,11 @@ export function LocalRouteContributions() {
         {!!saved?.history.length&&<details><summary>Contribution history</summary><ul>{saved.history.map((item:any,index:number)=><li key={index}>{item.kind} · {new Date(item.created).toLocaleString()}</li>)}</ul></details>}
       </form>
       <div>
-        <ContributionMap code={code} roads={roads} selected={form.segments} preview={preview} onToggle={toggle} onBounds={setBounds}/>
+        <ContributionMap code={code} extent={extent} roads={roads} selected={form.segments} preview={preview} onToggle={toggle} onBounds={setBounds}/>
+        <div className="geometry-modes contribution-origin" role="group" aria-label="Road source">
+          <button type="button" aria-pressed={origin==='catalogue'} disabled={busy||locked||!option?.hasSavedRoads} onClick={()=>setOrigin('catalogue')}>Saved alignment</button>
+          <button type="button" aria-pressed={origin==='live'} disabled={busy||locked} onClick={()=>setOrigin('live')}>Vicmap area</button>
+        </div>
         <div className="contribution-toolbar"><button type="button" className="secondary" title={closeView?'Load Vicmap road segments in this map view':'A closer map view is required'} disabled={busy||locked||!closeView} onClick={loadRoads}><MapPin size={16}/>Load visible roads</button>
           <span className="small muted">{form.segments.length} selected{!closeView?' · Overview scale':''}</span></div>
         <details open><summary>Selected segments ({form.segments.length})</summary>

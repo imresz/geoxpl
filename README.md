@@ -30,11 +30,17 @@ Check **Administration > Batches** for progress. After a restart the server resu
 
 ## Admin local route contributions
 
-**Administration > Local contributions** supports Metropolitan Routes 20 and 22. Choose the route, zoom into the Melbourne map, load visible Vicmap roads and select individual segments on the map or in the road list. Enter the public contributor name, evidence basis, optional observation date and HTTPS links, contribution, and remaining uncertainties. The existing Vicmap road source must be approved with its licence and attribution recorded.
+**Administration > Local contributions** supports Victorian M/A/B/C routes, metropolitan/state route numbers and separately identified numeric tags with an unconfirmed numbering scheme. Filter the picker by route code, or use **Add route** and specify its numbering scheme. A metropolitan number and the same bare numeric source tag remain different routes; historical National Route 1 is not implied by either. The original Routes 20/22 drafts and history keep their existing IDs.
+
+The map starts at the selected route's known extent, or Victoria for a new route. Zoom into a small area and load visible roads. **Saved alignment** reuses compatible approved Vicmap input records already retained for that route, including their original source dates and parent-import provenance; it works without contacting the live service. **Vicmap area** retrieves current nearby roads across Victoria. Both require source approval, licence and attribution, retain bounds/size limits, and exclude out-of-state records rather than inventing connections. Select individual segments on the map or in the list.
+
+Enter the public contributor name, evidence basis, optional observation date/HTTPS references, contribution and remaining uncertainties. **Section evidence** optionally adds notes, uncertainty and references for a selected segment, independently for this route membership. One versioned admin draft is maintained per route.
 
 **Save draft & preview** persists a private draft and displays the selected geometry. Publication requires that exact saved preview and explicit confirmation of the public credit and notes. The catalogue result is always **partially resolved**, shown with a dashed line and a community-supported label. No missing links are drawn and local knowledge does not certify route identity, signed turns or endpoints. Vicmap supplies the road coordinates; the contributor supplies the proposed route membership. Both are credited separately under **How this was mapped**.
 
-**Withdraw publication** requires a reason and immediately removes the active local result from public search/catalogue output. The saved draft, source snapshots, contribution actions and immutable geometry revisions are retained. Preview and republish the same draft, or save an edited revision after withdrawal. Published drafts are locked against edits, stale drafts/previews cannot publish, and an existing different alignment is never replaced. Drafts and history survive a server restart in the normal SQLite database; the additive tables are created on startup. This pilot does not accept public submissions or change the research engine.
+When another alignment already exists, the local candidate is published in its own request and never overwrites that alignment, its geometry revisions, resolution status or research policy. Normal route search offers the existing and local candidates as separately labelled choices; both also appear in the catalogue. The local result covers only the selected sections, not a verified replacement for the full route.
+
+**Withdraw publication** requires a reason and removes only the active local candidate from public choices/catalogue output. Its private draft, source snapshots, contribution actions and immutable geometry revisions remain. Preview and republish, or edit after withdrawal. Published drafts are locked; stale drafts/previews and changed source metadata cannot publish. Drafts/history survive restart in the existing SQLite tables with no re-key migration. Public submissions and the research engine are unchanged.
 
 ## Mapping history pilot
 
@@ -44,7 +50,7 @@ Every newly published road route now indexes a separate membership claim for eac
 
 **How this was mapped > Shared road sections** compares the selected current route with other active catalogue alignments using the same source namespace and persistent segment ID. Matching saved coordinates (allowing reversed digitisation) are shown as shared geometry. Different coordinates for the same ID are flagged separately, not silently joined; spatial crossings or similar-looking lines with different IDs are not treated as concurrency. Each shared section shows the two independent claims and can be located on the current map. Withdrawing a route removes it from current comparisons, without erasing its indexed revision evidence. Historical membership records remain viewable with their geometry revision; the current-catalogue comparison is deliberately not attached to an older revision.
 
-The admin contribution editor also accepts optional evidence, uncertainty and HTTPS references for each selected segment. These supplement that route's overall contribution and are preserved on publication, separately from another route's notes for the same road. This does not change the research engine, reinterpret ambiguous composite source codes, or automatically fill missing route memberships.
+The membership registry does not reinterpret ambiguous composite source codes or automatically fill missing route assignments.
 
 After upgrading, stop the single GeoXpl server and run:
 

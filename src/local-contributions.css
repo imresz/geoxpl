@@ -1,5 +1,13 @@
 .local-contributions>.section-heading { gap:16px;flex-wrap:wrap; }
 .local-contributions>.section-heading>select { width:280px;max-width:100%; }
+.contribution-route-picker { display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;max-width:100%; }
+.contribution-route-picker>select { width:280px;max-width:100%; }
+.contribution-filter { display:flex;align-items:center;gap:7px;flex-direction:row;width:150px;max-width:100%; }
+.contribution-filter input { padding:9px;width:120px; }
+.contribution-add { display:grid;place-items:center;width:36px;height:36px;border:1px solid var(--border);border-radius:4px;flex-shrink:0; }
+.contribution-new-route { display:flex;gap:14px;align-items:end;flex-wrap:wrap;padding:0 0 20px;border-bottom:1px solid var(--border);margin-bottom:20px; }
+.contribution-new-route label { flex:1;min-width:150px; }
+.contribution-origin { margin-top:12px; }
 .contribution-layout { display:grid;grid-template-columns:minmax(240px,320px) minmax(0,1fr);gap:24px;align-items:start; }
 .contribution-form { display:grid;gap:14px;min-width:0; }
 .contribution-map { height:440px;width:100%;min-width:0;background:#e3ece7; }

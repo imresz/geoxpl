@@ -16,7 +16,7 @@ import { isProvenancePilot, mappingLineage } from './provenance.js';
 import { routeCode, routeJobName } from './road-routes.js';
 import { batchRouteEntry } from './road-route-batch.js';
 import { readFileSync } from 'node:fs';
-import { localRouteView, localRouteRoads, saveLocalRoute, previewLocalRoute, publishLocalRoute, withdrawLocalRoute } from './local-routes.js';
+import { localRouteView, localRouteRoads, saveLocalRoute, previewLocalRoute, publishLocalRoute, withdrawLocalRoute, localRouteOptions, localRouteAlternatives } from './local-routes.js';
 import { routeMembershipReport } from './route-memberships.js';
 
 export function createApp(store, config = {}) {
@@ -37,14 +37,16 @@ export function createApp(store, config = {}) {
     return !!store.db.prepare('SELECT token FROM sessions WHERE token=? AND expires>?').get(createHash('sha256').update(token).digest('hex'), Date.now());
   };
   const requireAdmin = (req, res, next) => authenticated(req) ? next() : res.status(401).json({ error: 'Administrator sign-in required.' });
-  const summary = f => ({ id: f.id, name: f.name, displayName: f.displayName || f.name, locationLabel: f.locationLabel, locationDescription: f.locationDescription, type: f.type, status: f.status, lengthKm: f.lengthKm, areaKm2: f.areaKm2, extentEstimate: f.extentEstimate, bbox: f.displayBbox || f.bbox });
+  const summary = f => ({ id: f.id, name: f.name, displayName: f.displayName || f.name, locationLabel: f.locationLabel, locationDescription: f.locationDescription, type: f.type, status: f.status, lengthKm: f.lengthKm, areaKm2: f.areaKm2, extentEstimate: f.extentEstimate, bbox: f.displayBbox || f.bbox,
+    ...(f.roadRoute?.contribution ? {localContribution:{author:f.roadRoute.contribution.author}} : {}) });
   const viewJob = job => {
     const requested = job;
     if (job.superseded_by) job = store.currentJob(job.id);
-    const matches = store.jobFeatures(job.id);
+    const matches = [...store.jobFeatures(job.id),...localRouteAlternatives(store,job)];
     return { id: job.id, query: job.query, type: job.type, status: job.status, phase: job.phase, message: job.message, created: job.created, updated: job.updated,
       ...(requested.superseded_by ? { requestedJobId: requested.id, supersededBy: job.id } : {}),
-      selectionRequired: matches.length > 1, matches: matches.map(summary), feature: matches.length === 1 && job.feature_id ? store.feature(job.feature_id) : null };
+      selectionRequired: matches.length > 1, matches: matches.map(summary), feature: matches.length === 1 ?
+        (job.type==='road_route' ? matches[0] : job.feature_id ? store.feature(job.feature_id) : null) : null };
   };
   const session = res => {
     const token = randomBytes(32).toString('hex');
@@ -128,6 +130,7 @@ export function createApp(store, config = {}) {
       res.status(error instanceof z.ZodError ? 400 : 409).json({error:error instanceof z.ZodError ? 'Check the contribution fields.' : error.message});
     }
   };
+  app.get('/api/admin/local-routes', localOperation(() => localRouteOptions(store)));
   app.get('/api/admin/local-routes/:code', localOperation(req => localRouteView(store,req.params.code)));
   app.post('/api/admin/local-routes/:code/roads', localOperation(req => localRouteRoads(store,req.params.code,req.body,contributionBoundary(),config.contributionLoader)));
   app.put('/api/admin/local-routes/:code', localOperation(req => saveLocalRoute(store,req.params.code,req.body)));
