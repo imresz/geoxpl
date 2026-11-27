@@ -7,3 +7,4 @@ lerc==4.0.1
 pyflwdir==0.6.0
 numba==0.63.1
 llvmlite==0.46.0
+pyshp==2.3.1

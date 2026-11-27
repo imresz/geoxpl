@@ -18,6 +18,7 @@ const methods = {
   mapped_landform_valley_floor: 'Combined reviewed mapped terraces, fans and floodplains that intersect the principal drainage.',
   floor_anchored_terrain_segmentation: 'Extended the reviewed valley floor onto adjoining slopes using relative elevation. Competing terrain lows help constrain the edge.',
   drainage_constrained_multiscale_terrain: 'Compared numeric Vicmap elevations, mapped river continuity, terrain drainage and relative landform shape at three scales. The result includes candidate valley sides, not only the floor; it is not a published named-valley boundary.',
+  flood_supported_multiscale_terrain: 'Used selected high-reliability modelled flood mapping to support a partial valley-floor candidate, compared the surrounding terrain at three scales, and retained artificial study cuts separately from estimated terrain edges. This does not establish a minimum or complete valley.',
   local_knowledge_vicmap_match: 'An administrator selected Vicmap road segments using an attributed local contribution. Road connectivity does not verify the signed route or permitted turns.',
   vicmap_exact_route_code: 'Selected Vicmap road records carrying this exact route tag. A road may also have separately evidenced memberships of other routes.',
   dtp_exact_srns_code: 'Selected road records carrying this exact DTP SRNS code. Current signing and continuity are not independently verified.'
@@ -31,6 +32,8 @@ export function mappingLineage(snapshot) {
     processorVersion: snapshot.algorithmVersion,
     status: snapshot.status,
     geometryType: snapshot.geometry?.type,
+    ...(snapshot.floodSupport?{floodSupport:(({geometry,bbox,...summary})=>summary)(snapshot.floodSupport)}:{}),
+    ...(snapshot.boundaryEvidence?{boundaryEvidence:(({estimatedEdges,studyCuts,...summary})=>summary)(snapshot.boundaryEvidence)}:{}),
     ...(snapshot.terrainReasoning ? {terrainReasoning:(( {stableCore,outerEnvelope,...reasoning})=>({...reasoning,stableCore:{areaKm2:stableCore.areaKm2},outerEnvelope:{areaKm2:outerEnvelope.areaKm2}}))(snapshot.terrainReasoning)} : {}),
     ...(snapshot.roadRoute?.contribution ? { contribution:snapshot.roadRoute.contribution } : {}),
     ...(snapshot.roadRoute?.review ? { routeReview: snapshot.roadRoute.review, routeSegments: snapshot.roadRoute.segments } : {}),

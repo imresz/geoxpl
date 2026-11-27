@@ -400,6 +400,26 @@ Under **How this was mapped**, compare **Central**, **Common area** (intersectio
 
 **Retention and limits:** `runtime/terrain-reasoning` stores checksummed numeric tiles, input manifests and computed results. Back it up with SQLite. Per study: at most 1,200 tiles, 160MB compressed input, five million analysis cells and a 15-minute computation limit. Four bounded download requests use up to three connection retries. Wrong service metadata, missing samples, inconsistent shared tile edges, changed input revisions/approvals, invalid geometry and excessive extraction fail without inventing a polygon. Successful cached tiles and computed outputs survive interruption; an unchanged repeat does not add a geometry revision. Existing revisions remain immutable. Library versions and source evidence are retained with each new geometry.
 
+### Loddon flood-supported floor and boundary evidence
+
+The Loddon pilot can use the [North Central CMA 1% AEP Flood Extent archive](https://data.gov.au/data/dataset/244468a2-f9ee-4663-8440-72b89425efd6), declared **CC BY 2.5 Australia**. The retained archive was published on 21 November 2021. It is not the newer Flood Eye service and is not assumed current. The adapter verifies the catalogue licence and exact resource URL before retaining the ZIP; a changed source version creates a separate retained snapshot.
+
+Only polygon components that intersect the saved Loddon River are selected, and only where the source explicitly says **AEP 1%, Modelled, High reliability**. The current selection is the **Bridgewater Flood Management Plan 2015**, scenario `BRID15ARI100`, record modification date 23 June 2015. These are publisher attributes, not independent validation. Older low-reliability estimates, unknown scenarios and unrelated drainage are excluded. The published flood evidence is partial; absence of selected mapping means unknown, not safe or outside the valley. No flood depth, present-day flood forecast or property clearance is calculated.
+
+The floor candidate retains this selected flood mapping and adds connected terrain within 300m where slope is at most 3 degrees, modelled height above drainage is 0-10m and 1500m relative elevation is at most 5m. These are explicit experimental interpretation rules, not a validated flood model or a guaranteed minimum valley. Surrounding terrain is compared at the existing three scales. The original study `[143.86,-36.82,144.12,-36.50]` expands to `[143.74,-36.84,144.23,-36.46]`, within the existing five-million-cell processing limit. The whole named Loddon Valley and natural longitudinal endpoints are not inferred.
+
+The map offers **Terrain extent / Valley floor** and an independent **Published flood evidence** overlay. Blue is the selected archived flood scenario; magenta dotted lines are estimated terrain/floor edges; grey dashed lines are artificial study limits. Polygon boundary segments within 45m (1.5 analysis cells) of the study window are classified as study cuts, rather than drawn as natural edges. These classifications are saved for the central, common-area, wider-envelope and floor geometries. **How this was mapped** records the floor rule, selected study and source dates, excluded record counts, archive checksum, attribution, licence and artificial-cut lengths. High parameter agreement does not establish accuracy on the low-relief plain.
+
+After installing the updated Python requirements, stop the server and back up SQLite. Enable the existing Loddon request only:
+
+```powershell
+node --env-file-if-exists=.env scripts/update-loddon-flood.mjs --approve-source
+npm run build
+npm start
+```
+
+The previous Loddon feature identity and all geometry revisions are retained; Yarra/Ovens pilots are not queued. The source format is `nccma-flood` and is excluded from automatic vector imports. Both flood and DEM approvals, versions, settings and river revision are rechecked before publication. `--retry` explicitly repeats a completed request; unchanged inputs do not add a geometry revision. Raw flood ZIPs and source snapshot metadata are stored in `runtime/flood-support`; keep this directory with `runtime/terrain-reasoning` and database backups. No AI research is involved. PyShp reads the bounded archive without extracting paths; Shapely/GEOS validates projected and geographic output topology before Node checks dimensions, structure and bounds, avoiding a duplicate quadratic JavaScript check on detailed source polygons.
+
 ## Ubuntu deployment with Docker Compose
 
 Install Docker Engine and the Compose plugin using [Docker's Ubuntu instructions](https://docs.docker.com/engine/install/ubuntu/). Clone this repository and run:

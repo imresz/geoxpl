@@ -1,0 +1,10 @@
+.legend-study-cut { display:inline-block; width:24px; border-top:2px dashed #56666d; flex-shrink:0; }
+.legend-flood-support { display:inline-block; width:24px; height:10px; background:#2279bb33; border:1px solid #2279bb; flex-shrink:0; }
+.flood-mapping-notes h3 { margin:16px 0 8px; }
+.flood-study { margin-top:16px; border-top:1px solid var(--border); padding-top:12px; font-size:12px; }
+.flood-study strong { overflow-wrap:anywhere; }
+.flood-study dl { margin-top:10px; }
+.map-summary .map-legend > .flood-key-line { padding-left:0; }
+.map-legend .layer-controls { border-top:1px solid var(--border); padding-top:6px; }
+.map-legend .layer-controls summary { cursor:pointer; font-size:11px; }
+.map-legend .layer-controls > div { display:grid; gap:7px; padding-top:9px; line-height:1.4; }

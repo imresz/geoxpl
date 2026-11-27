@@ -6,7 +6,7 @@ import { stateParkSource } from './state-parks.js';
 
 export const sourceSchema = z.object({
   name: z.string().trim().min(2).max(200), type: z.enum(['river', 'valley', 'national_park', 'state_forest', 'state_park']),
-  format: z.enum(['arcgis', 'geojson', 'vic-gmu250', 'ga-dem', 'vic-dem10m', 'capad', 'vic-state-forest', 'vic-state-park']), url: z.url().startsWith('https://'),
+  format: z.enum(['arcgis', 'geojson', 'vic-gmu250', 'ga-dem', 'vic-dem10m', 'nccma-flood', 'capad', 'vic-state-forest', 'vic-state-park']), url: z.url().startsWith('https://'),
   nameField: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), idField: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
   licence: z.string().max(500), attribution: z.string().max(500), version: z.string().max(200),
   completeness: z.enum(['unknown', 'partial', 'complete']), aliases: z.array(z.string().max(150)).max(20),

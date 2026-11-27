@@ -10,6 +10,7 @@ import { valleyFloorSchema, landformEndpoint, eligibleValleyDrainage } from './v
 import { terrainSchema, demEndpoint } from './terrain.js';
 import { terrainReasoningSchema,pilotInput } from './terrain-reasoning.js';
 import { vicmapDemEndpoint } from './vicmap-dem.js';
+import { floodArchiveUrl } from './flood-evidence.js';
 import { formationJunctionsSchema } from './geofabric.js';
 import { enqueueBatch, listBatches, batchStatus } from './batches.js';
 import { workflowView, queueInvestigation, applyInvestigation, changeReportState, updateRecommendation, recordReportReview } from './report-workflow.js';
@@ -217,7 +218,7 @@ export function createApp(store, config = {}) {
     }
   });
   app.get('/api/admin/overview', (_req, res) => res.json({ jobs: store.jobs().map(j => ({ ...j, matches: store.jobFeatures(j.id).map(summary), settings: store.featureSettings(j.id) })), sources: store.sources(), reports: store.reports(), features: store.features().map(({ geometry, recordedNetwork, ...f }) => f.type === 'road_route' ? summary(f) : f), events: store.db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT 100').all(), searches: store.db.prepare('SELECT COUNT(*) AS count FROM searches').get().count, imports: store.db.prepare('SELECT id,source_id,job_id,created,checksum FROM imports ORDER BY created DESC LIMIT 100').all(), aiConfigured: aiConfigured(), aiHourlyLimit: Math.max(1, Math.min(30, Number(process.env.AI_REQUESTS_PER_HOUR) || 3)) }));
-  const validLandformSource = source => (source.format !== 'vic-gmu250' || (source.type === 'valley' && source.url === landformEndpoint)) && (source.format !== 'ga-dem' || (source.type === 'valley' && source.url === demEndpoint)) && (source.format !== 'vic-dem10m' || (source.type === 'valley' && source.url === vicmapDemEndpoint));
+  const validLandformSource = source => (source.format !== 'vic-gmu250' || (source.type === 'valley' && source.url === landformEndpoint)) && (source.format !== 'ga-dem' || (source.type === 'valley' && source.url === demEndpoint)) && (source.format !== 'vic-dem10m' || (source.type === 'valley' && source.url === vicmapDemEndpoint)) && (source.format !== 'nccma-flood' || (source.type === 'valley' && source.url === floodArchiveUrl));
   app.post('/api/admin/sources', (req, res) => {
     const source = sourceSchema.parse(req.body);
     if (!validLandformSource(source)) return res.status(400).json({ error: 'Terrain and GMU250 sources require type Valley and their supported official endpoint.' });
@@ -270,6 +271,7 @@ export function createApp(store, config = {}) {
     if(settings.terrainReasoning===undefined&&previous.terrainReasoning)settings.terrainReasoning=previous.terrainReasoning;
     if(settings.terrainReasoning){
       if(job.type!=='valley'||!store.sources().some(s=>s.id===settings.terrainReasoning.sourceId&&s.status==='approved'&&s.format==='vic-dem10m'&&validLandformSource(s)))return res.status(400).json({error:'Terrain reasoning requires an approved Vicmap numeric elevation source.'});
+      if(settings.terrainReasoning.floodSupport&&(settings.terrainReasoning.pilotId!=='loddon'||!store.sources().some(s=>s.id===settings.terrainReasoning.floodSupport.sourceId&&s.status==='approved'&&s.format==='nccma-flood'&&validLandformSource(s))))return res.status(400).json({error:'Loddon flood support requires an approved CMA archive.'});
       try{pilotInput(settings.terrainReasoning,store.feature(settings.terrainReasoning.drainageFeatureId));}catch(error){return res.status(400).json({error:error.message});}
     }
     settings.aliases = [...new Set(settings.aliases.map(normalize))].filter(a => a !== job.normalized).sort();
@@ -285,7 +287,7 @@ export function createApp(store, config = {}) {
       if (!eligibleValleyDrainage(definition, drainage)) return res.status(400).json({ error: 'Select a current resolved river as the principal drainage, or retain the explicitly reviewed mapped revision.' });
       definition.recordIds = [...new Set(definition.recordIds)].sort();
     }
-    if (settings.preferredSourceId && !store.sources().some(s => s.id === settings.preferredSourceId && s.type === job.type && s.status === 'approved' && !['ga-dem','vic-dem10m'].includes(s.format))) return res.status(400).json({ error: 'Select an approved vector source of the same feature type.' });
+    if (settings.preferredSourceId && !store.sources().some(s => s.id === settings.preferredSourceId && s.type === job.type && s.status === 'approved' && !['ga-dem','vic-dem10m','nccma-flood'].includes(s.format))) return res.status(400).json({ error: 'Select an approved vector source of the same feature type.' });
     if (JSON.stringify(settings) === JSON.stringify(store.featureSettings(job.id))) return res.json({ ok: true, unchanged: true });
     store.setFeatureSettings(job.id, settings);
     store.invalidateFeature(job.id, 'Feature identity or source selection changed. Reprocessing required.');

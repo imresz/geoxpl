@@ -77,7 +77,7 @@ def keep_anchored(mask, anchors):
     return np.isin(labels, ids[ids > 0])
 
 
-def terrain_masks(elevation, river, transform, study, cell=CELL):
+def terrain_masks(elevation, river, transform, study, cell=CELL, flood=None):
     if elevation.ndim != 2 or elevation.shape != river.shape or elevation.shape != study.shape or elevation.size > MAX_CELLS:
         raise ValueError('Unsupported terrain grid dimensions.')
     if not np.isfinite(elevation).all() or not river.any() or not study.any():
@@ -102,6 +102,16 @@ def terrain_masks(elevation, river, transform, study, cell=CELL):
     smooth = ndi.gaussian_filter(elevation, 1, mode='nearest')
     dy, dx = np.gradient(smooth, cell)
     slope = np.degrees(np.arctan(np.hypot(dx, dy)))
+    floor = None
+    segmentation_anchors = anchors
+    if flood is not None:
+        if flood.shape != study.shape or not flood.any() or (flood & ~study).any():
+            raise ValueError('Flood support must lie in the declared study area.')
+        near = ndi.distance_transform_edt(~flood) * cell <= 300
+        relative = smooth - ndi.gaussian_filter(smooth, 1500/cell, mode='nearest')
+        additions = near & study & routing & (slope <= 3) & (hand >= 0) & (hand <= 10) & (relative <= 5)
+        floor = keep_anchored(flood | additions, flood)
+        segmentation_anchors = anchors | floor
     masks, diagnostics = [], []
     for radius in SCALES:
         progress(f'classifying relative terrain at {radius} m')
@@ -111,14 +121,14 @@ def terrain_masks(elevation, river, transform, study, cell=CELL):
         threshold = np.maximum(5, np.sqrt(local_var)*0.5)
         ridges = tpi > threshold
         lows = tpi < -threshold
-        competing = h_minima(np.round(tpi*2).astype(np.int32), 10) & ~ndi.binary_dilation(anchors, iterations=10)
+        competing = h_minima(np.round(tpi*2).astype(np.int32), 10) & ~ndi.binary_dilation(segmentation_anchors, iterations=10)
         competing[[0, -1], :] = True
         competing[:, [0, -1]] = True
         markers = np.zeros(elevation.shape, dtype=np.int32)
         markers[competing] = 2
-        markers[anchors] = 1
+        markers[segmentation_anchors] = 1
         candidate = watershed(tpi, markers, connectivity=2) == 1
-        candidate = keep_anchored((candidate & routing & study) | anchors, anchors)
+        candidate = keep_anchored((candidate & routing & study) | segmentation_anchors, segmentation_anchors)
         if not candidate.any():
             raise ValueError('The terrain rule did not retain a supported candidate.')
         masks.append(candidate)
@@ -163,6 +173,15 @@ def terrain_masks(elevation, river, transform, study, cell=CELL):
             ]}
     if weak >= 0.3:
         info['limitations'].append('Low relief near much of the candidate edge is comparable to DEM vertical uncertainty. No sharp outer valley edge is established, even if parameter agreement is high.')
+    if floor is not None:
+        info['_floorMask'] = floor
+        info['rules'].insert(2, 'Use river-connected, high-reliability modelled 1% AEP flood mapping as supporting floor evidence; retain its scenario and dates. Do not equate it with a minimum or complete valley boundary.')
+        info['limitations'].extend([
+            'Flood support comes from a retained published archive. Selected study and record dates are shown; newer mapping may exist. No present-day property clearance or emergency advice is provided.',
+            'Only selected river-connected high-reliability modelled records were used. Unmapped and excluded areas are unknown, not safe or outside the valley.',
+            'The floor candidate includes a bounded terrain-derived fringe beyond the selected flood polygons. It is not a published flood extent or a verified minimum valley.',
+            'Expanding the study reduces some clipping but cannot establish a sharp natural edge on a low-relief plain.'
+        ])
     return central, core, envelope, info
 
 

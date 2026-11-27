@@ -7,6 +7,7 @@ import type { RouteQualityData } from './api';
 import { BookReferenceNotes } from './BookReferenceNotes';
 import type { PublicBookCitation } from './book-reference-types';
 import {TerrainReasoning,terrainOf,type TerrainReasoningData,type TerrainMode} from './TerrainReasoning';
+import {FloodMappingNotes,type FloodMapping,type ValleyBoundary} from './ValleyEvidence';
 
 type Evidence = {
   sourceName?: string; sourceUrl?: string; sourceVersion?: string; attribution?: string;
@@ -25,6 +26,8 @@ type History = {
     extent?: ExtentEstimate; areaKm2?: number; floorAreaKm2?: number;
     scaleSensitivity?: { intersectionOverUnion: number; scalesMetres: number[]; areaKm2: number[] };
     terrainReasoning?:TerrainReasoningData;
+    floodSupport?:FloodMapping;
+    boundaryEvidence?:Omit<ValleyBoundary,'estimatedEdges'|'studyCuts'>;
     contribution?: { author:string; basis:string; observedAt:string; statement:string; uncertainty:string; version:number; links:string[] };
     estimates?: { id: string; label: string; method: string; certainty: string; lengthKm: number; basis?: string; evidenceRecord?: string }[];
   } | null;
@@ -103,6 +106,7 @@ export function MappingHistory({ featureId, onLocate,terrainMode,onTerrainMode }
           <a className="source-link" href={lineage.extent.evidenceUrl} target="_blank" rel="noreferrer">Geographic context</a>
         </section>}
         {lineage.terrainReasoning&&<TerrainReasoning data={lineage.terrainReasoning} mode={terrainMode} onMode={history?.revisions[0].id===history?.revisionId?onTerrainMode:undefined}/>}
+        {lineage.floodSupport&&<FloodMappingNotes data={lineage.floodSupport} boundary={lineage.boundaryEvidence}/>}
         <dl><dt>Result</dt><dd>{lineage.status ? statusLabel(lineage.status) : 'Not recorded'}{lineage.geometryType && ` · ${lineage.geometryType}`}</dd>
           <dt>Processor</dt><dd>{lineage.processorVersion || 'Not recorded'}</dd></dl>
         <h3>Published inputs</h3>

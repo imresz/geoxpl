@@ -4,6 +4,7 @@ import { featureLabel, type Feature, type Interpolation } from './api';
 import { LocateFixed, Maximize, MapPin, RefreshCw } from 'lucide-react';
 import { CONTOUR_SOURCE, CONTOUR_PREFERENCE, contourSource, contourLayer, contourCoverage } from './contours';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import {valleyBoundaryOf,floodMappingOf} from './ValleyEvidence';
 
 const INITIAL: [number, number, number, number] = [137.5, -40.8, 151.2, -32.5];
 const FEATURE_PADDING = { top: 70, right: 60, bottom: 110, left: 55 };
@@ -12,6 +13,9 @@ export function MapView({ feature, focus, reviewFocus }: { feature: Feature | nu
   const element = useRef<HTMLDivElement>(null), map = useRef<maplibregl.Map | null>(null);
   const [loaded, setLoaded] = useState(false), [error, setError] = useState(''), [center, setCenter] = useState('37.10 S, 144.35 E');
   const [showEstimates, setShowEstimates] = useState(true);
+  const [showFlood,setShowFlood]=useState(true);
+  const [layerControlsOpen,setLayerControlsOpen]=useState(()=>!window.matchMedia('(max-width:620px)').matches);
+  const boundary=valleyBoundaryOf(feature),flood=floodMappingOf(feature);
   const [showContours, setShowContours] = useState(() => { try { return localStorage.getItem(CONTOUR_PREFERENCE) === 'true'; } catch { return false; } });
   const [contourLoading, setContourLoading] = useState(false), [contourError, setContourError] = useState(false), [contourAttempt, setContourAttempt] = useState(0);
   const [contourAvailability, setContourAvailability] = useState<string | null>('Contours hidden at overview scale');
@@ -19,7 +23,7 @@ export function MapView({ feature, focus, reviewFocus }: { feature: Feature | nu
   const plmExtent=feature?.statePark||feature?.forest;
   const estimates = feature?.interpolations?.features || [];
   const attribution = [...new Set(feature?.evidence.map(e => e.attribution).filter(Boolean) || [])].join(' · ');
-  useEffect(() => { setShowEstimates(true); }, [feature?.id]);
+  useEffect(() => { setShowEstimates(true); setShowFlood(true); setLayerControlsOpen(!window.matchMedia('(max-width:620px)').matches); }, [feature?.id]);
   useEffect(() => {
     if (!element.current) return;
     let m: maplibregl.Map;
@@ -43,6 +47,15 @@ export function MapView({ feature, focus, reviewFocus }: { feature: Feature | nu
       m.addLayer({ id: 'estimated-extent-fill', type: 'fill', source: 'estimated-extent', paint: { 'fill-color': '#a33f71', 'fill-opacity': 0.15 } });
       m.addLayer({ id: 'estimated-extent-halo', type: 'line', source: 'estimated-extent', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 6, 'line-dasharray': [0.1, 1.6] } });
       m.addLayer({ id: 'estimated-extent-line', type: 'line', source: 'estimated-extent', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#a33f71', 'line-width': 3, 'line-dasharray': [0.1, 3.2] } });
+      m.addSource('estimated-natural-edges',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+      m.addLayer({id:'estimated-natural-halo',type:'line',source:'estimated-natural-edges',layout:{'line-cap':'round'},paint:{'line-color':'#ffffff','line-width':6,'line-dasharray':[.1,1.6]}});
+      m.addLayer({id:'estimated-natural-line',type:'line',source:'estimated-natural-edges',layout:{'line-cap':'round'},paint:{'line-color':'#a33f71','line-width':3,'line-dasharray':[.1,3.2]}});
+      m.addSource('study-cut-edges',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+      m.addLayer({id:'study-cut-halo',type:'line',source:'study-cut-edges',paint:{'line-color':'#ffffff','line-width':5,'line-dasharray':[4,2]}});
+      m.addLayer({id:'study-cut-line',type:'line',source:'study-cut-edges',paint:{'line-color':'#56666d','line-width':2,'line-dasharray':[6,3]}});
+      m.addSource('published-flood-support',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+      m.addLayer({id:'published-flood-fill',type:'fill',source:'published-flood-support',paint:{'fill-color':'#2279bb','fill-opacity':.25}});
+      m.addLayer({id:'published-flood-line',type:'line',source:'published-flood-support',paint:{'line-color':'#2279bb','line-width':1.2}});
       m.addSource('interpolated', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
       m.addLayer({ id: 'interpolated-halo', type: 'line', source: 'interpolated', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 6, 'line-dasharray': [0.1, 1.6] } });
       m.addLayer({ id: 'interpolated-line', type: 'line', source: 'interpolated', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#a33f71', 'line-width': 3, 'line-dasharray': [0.1, 3.2] } });
@@ -83,6 +96,10 @@ export function MapView({ feature, focus, reviewFocus }: { feature: Feature | nu
     map.current.setPaintProperty('valley-fill','fill-color',feature?.type==='state_park'?'#57a89a':feature?.type==='state_forest'?'#adba65':feature?.type==='national_park'?'#4c9a54':'#188a75');
     (map.current.getSource('selected') as maplibregl.GeoJSONSource).setData(feature && !feature.extentEstimate ? { type: 'Feature', properties: {}, geometry: feature.geometry } : { type: 'FeatureCollection', features: [] });
     (map.current.getSource('estimated-extent') as maplibregl.GeoJSONSource).setData(feature?.extentEstimate ? { type: 'Feature', properties: {}, geometry: feature.geometry } : { type: 'FeatureCollection', features: [] });
+    (map.current.getSource('estimated-natural-edges') as maplibregl.GeoJSONSource).setData(boundary?.estimatedEdges||{type:'FeatureCollection',features:[]});
+    (map.current.getSource('study-cut-edges') as maplibregl.GeoJSONSource).setData(boundary?.studyCuts||{type:'FeatureCollection',features:[]});
+    (map.current.getSource('published-flood-support') as maplibregl.GeoJSONSource).setData(flood?.geometry?{type:'Feature',properties:{},geometry:flood.geometry}:{type:'FeatureCollection',features:[]});
+    for(const layer of ['estimated-extent-halo','estimated-extent-line'])map.current.setPaintProperty(layer,'line-opacity',boundary?0:layer==='estimated-extent-halo'?.9:1);
     (map.current.getSource('interpolated') as maplibregl.GeoJSONSource).setData(feature?.interpolations || { type: 'FeatureCollection', features: [] });
     const points = (['source', 'mouth'] as const).flatMap(kind => feature?.[kind] ? [{ kind, coordinates: feature[kind]!.coordinates }] : []);
     (map.current.getSource('endpoints') as maplibregl.GeoJSONSource).setData({
@@ -100,8 +117,9 @@ export function MapView({ feature, focus, reviewFocus }: { feature: Feature | nu
   }, [feature, loaded]);
   useEffect(() => {
     if (!loaded || !map.current) return;
-    for (const layer of ['interpolated-line', 'interpolated-halo', 'estimated-extent-fill', 'estimated-extent-halo', 'estimated-extent-line']) map.current.setLayoutProperty(layer, 'visibility', showEstimates ? 'visible' : 'none');
+    for (const layer of ['interpolated-line', 'interpolated-halo', 'estimated-extent-fill', 'estimated-extent-halo', 'estimated-extent-line','estimated-natural-halo','estimated-natural-line','study-cut-halo','study-cut-line']) map.current.setLayoutProperty(layer, 'visibility', showEstimates ? 'visible' : 'none');
   }, [showEstimates, loaded]);
+  useEffect(()=>{if(loaded&&map.current)for(const layer of ['published-flood-fill','published-flood-line'])map.current.setLayoutProperty(layer,'visibility',showFlood?'visible':'none');},[loaded,showFlood]);
   useEffect(() => {
     if (!loaded || !map.current || !focus) return;
     setShowEstimates(true);
@@ -115,11 +133,25 @@ export function MapView({ feature, focus, reviewFocus }: { feature: Feature | nu
   return <section className="map-region" aria-label="Interactive geographical map">
     <div className="map-canvas" ref={element} />
     <div className="map-summary"><div className="map-location"><MapPin size={14}/><span>{feature ? featureLabel(feature) : 'Southeastern Australia'}</span></div>
-    <section className="map-legend" aria-label="Map legend"><strong>Map legend</strong>
+    {flood&&boundary?(<section className="map-legend" aria-label="Map legend"><strong>Map legend</strong>
+      <span className="flood-key-line"><i className="legend-interpolated"/>{feature?.extentEstimate?.kind==='valley_floor'?'Estimated floor edge':'Estimated terrain edge'}</span>
+      <span className="flood-key-line"><i className="legend-study-cut"/>Study limit, not a valley edge</span>
+      <span className="flood-key-line" style={{opacity:showFlood?1:.55}}><i className="legend-flood-support"/>Archived 1% AEP flood evidence{!showFlood?' (hidden)':''}</span>
+      <details className="layer-controls" open={layerControlsOpen} onToggle={e=>setLayerControlsOpen(e.currentTarget.open)}><summary>Layers and flood details</summary><div>
+        <label><input type="checkbox" aria-label="Show contours" checked={showContours} disabled={!loaded} onChange={e=>setShowContours(e.target.checked)}/>Contours (Victoria)</label>
+        <label><input type="checkbox" aria-label="Show valley interpretation" checked={showEstimates} onChange={e=>setShowEstimates(e.target.checked)}/>Valley interpretation</label>
+        <label><input type="checkbox" aria-label="Show published flood evidence" checked={showFlood} onChange={e=>setShowFlood(e.target.checked)}/>Published flood evidence</label>
+        <span>Archive: {flood?.archiveDate.slice(0,10)}</span><span>Not current flooding; coverage is partial</span>
+        {showContours&&<span>{contourAvailability||(contourError?'Some contour tiles unavailable':contourLoading?'Loading contours':'Elevations in metres')}</span>}
+      </div></details>
+    </section>):(<section className="map-legend" aria-label="Map legend"><strong>Map legend</strong>
       <label className="contour-toggle"><input type="checkbox" aria-label="Show contours" checked={showContours} disabled={!loaded} onChange={e => setShowContours(e.target.checked)}/><i className="legend-contour"/>Contours (Victoria)</label>
       {showContours && <span className="contour-status" role="status">{contourAvailability || (contourError ? 'Some contour tiles unavailable' : contourLoading ? 'Loading contours' : 'Elevations in metres')}{contourError && !contourAvailability && <button className="contour-retry" title="Retry contours" aria-label="Retry contours" onClick={() => setContourAttempt(n => n + 1)}><RefreshCw size={14}/></button>}</span>}
-      {feature && (feature.type === 'road_route' ? feature.roadRoute?.contribution ? <span><i className="legend-recorded" style={{borderColor:'#984465',borderTopStyle:'dashed'}}/>Community-supported candidate</span> : feature.roadRoute?.review ? <><span><i className="legend-recorded" style={{borderColor:'#984465',borderTopStyle:'dashed'}}/>Matched alignment, signing unverified</span><span><i className="endpoint-dot review-point"/>Junctions to verify</span></> : <span><i className="legend-recorded" style={{borderColor:'#984465'}}/>Published route segments</span> : ['national_park','state_forest','state_park'].includes(feature.type)?<><span><i className="legend-recorded" style={{borderColor:feature.type==='state_park'?'#267f85':feature.type==='state_forest'?'#697b2b':'#26743c'}}/>{feature.type==='state_park'?'Published state-park parcels':feature.type==='state_forest'?'Published state-forest parcels':'Published park boundary'}</span><span>{feature.type!=='national_park'?`PLM25 record version: ${plmExtent?.sourceVersionDates.at(-1)?.slice(0,10)||'Not supplied'}`:`CAPAD snapshot: ${feature.park?.boundaryDate}`}</span></>:feature.extentEstimate ? <><label><input type="checkbox" aria-label={`Show ${feature.extentEstimate.label.toLowerCase()}`} checked={showEstimates} onChange={e => setShowEstimates(e.target.checked)}/><i className="legend-interpolated"/>{feature.extentEstimate.label}</label><span>Partial; boundary unverified</span></> : <><span><i className="legend-recorded"/>Recorded geometry</span><label><input type="checkbox" aria-label="Show interpolated connections" checked={showEstimates} disabled={!estimates.length} onChange={e => setShowEstimates(e.target.checked)}/><i className="legend-interpolated"/>Interpolated (unverified)</label></>)}
-    </section>
+      {feature && (feature.type === 'road_route' ? feature.roadRoute?.contribution ? <span><i className="legend-recorded" style={{borderColor:'#984465',borderTopStyle:'dashed'}}/>Community-supported candidate</span> : feature.roadRoute?.review ? <><span><i className="legend-recorded" style={{borderColor:'#984465',borderTopStyle:'dashed'}}/>Matched alignment, signing unverified</span><span><i className="endpoint-dot review-point"/>Junctions to verify</span></> : <span><i className="legend-recorded" style={{borderColor:'#984465'}}/>Published route segments</span> : ['national_park','state_forest','state_park'].includes(feature.type)?<><span><i className="legend-recorded" style={{borderColor:feature.type==='state_park'?'#267f85':feature.type==='state_forest'?'#697b2b':'#26743c'}}/>{feature.type==='state_park'?'Published state-park parcels':feature.type==='state_forest'?'Published state-forest parcels':'Published park boundary'}</span><span>{feature.type!=='national_park'?`PLM25 record version: ${plmExtent?.sourceVersionDates.at(-1)?.slice(0,10)||'Not supplied'}`:`CAPAD snapshot: ${feature.park?.boundaryDate}`}</span></>:feature.extentEstimate ? <><label><input type="checkbox" aria-label={`Show ${feature.extentEstimate.label.toLowerCase()}`} checked={showEstimates} onChange={e => setShowEstimates(e.target.checked)}/><i className="legend-interpolated"/>{boundary?(feature.extentEstimate.kind==='valley_floor'?'Estimated floor edge':'Estimated terrain edge'):feature.extentEstimate.label}</label><span>Partial; boundary unverified</span></> : <><span><i className="legend-recorded"/>Recorded geometry</span><label><input type="checkbox" aria-label="Show interpolated connections" checked={showEstimates} disabled={!estimates.length} onChange={e => setShowEstimates(e.target.checked)}/><i className="legend-interpolated"/>Interpolated (unverified)</label></>)}
+    {boundary&&<span><i className="legend-study-cut"/>Study limit, not a valley edge</span>}
+    {flood&&<><label><input type="checkbox" aria-label="Show published flood evidence" checked={showFlood} onChange={e=>setShowFlood(e.target.checked)}/><i className="legend-flood-support"/>Published flood evidence · 1% AEP</label><span>Archive: {flood.archiveDate.slice(0,10)}</span><span>Not current flooding; coverage is partial</span></>}
+    </section>)}
+
     {error && <div className="map-error" role="status">{error}<button aria-label="Dismiss map message" onClick={() => setError('')}>×</button></div>}</div>
     <div className="map-tools">
       <button title="Fit selected feature" aria-label="Fit selected feature" onClick={() => { if (map.current) map.current.fitBounds(bounds, { padding: feature ? padding(map.current) : 50 }); }}><Maximize size={18}/></button>

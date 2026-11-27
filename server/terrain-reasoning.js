@@ -8,10 +8,12 @@ import { area,bbox,feature,booleanValid,coordEach,booleanIntersects,bboxPolygon 
 import { retainVicmapElevation,sha,demSourceFingerprint } from './vicmap-dem.js';
 import { terrainPilotVersion,terrainPilots } from './terrain-pilot-config.js';
 import { drainageFingerprint } from './valley-floor.js';
+import { deriveFloodSupportedValley } from './flood-supported-valley.js';
+import { floodFingerprint } from './flood-evidence.js';
 
 const project=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 export const terrainReasoningSchema=z.object({pilotId:z.enum(['yarra','ovens','loddon']),sourceId:z.string().min(1),
-  drainageFeatureId:z.string().min(1),drainageChecksum:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
+  drainageFeatureId:z.string().min(1),drainageChecksum:z.string().regex(/^[a-f0-9]{64}$/),floodSupport:z.object({sourceId:z.string().min(1)}).strict().optional()}).strict();
 export function pilotInput(config,drainage) {
   const settings=terrainReasoningSchema.parse(config),pilot=terrainPilots.find(p=>p.id===settings.pilotId);
   if(!drainage||drainage.id!==settings.drainageFeatureId||drainage.type!=='river'||drainage.method!=='geofabric_directed_main_stem'||
@@ -22,7 +24,8 @@ export function pilotInput(config,drainage) {
 }
 export function runReasoning(python,manifest,input,options={}) {
   return new Promise((accept,reject)=>{
-    const child=execFile(python,[join(project,'terrain','reasoning.py'),manifest,input],{windowsHide:true,timeout:options.timeout||900000,maxBuffer:16_000_000,
+    if(options.script&&!['reasoning.py','flood_valley.py'].includes(options.script))return reject(Error('Unsupported terrain processor.'));
+    const child=execFile(python,[join(project,'terrain',options.script||'reasoning.py'),manifest,input],{windowsHide:true,timeout:options.timeout||900000,maxBuffer:16_000_000,
       env:{...process.env,NUMBA_NUM_THREADS:'2',...(options.pythonPath?{PYTHONPATH:options.pythonPath}:{})}},(error,stdout,stderr)=>{
       if(error){let message;try{message=JSON.parse(stderr.trim().split(/\r?\n/).at(-1)).error;}catch{}
         return reject(Error(message||(error.killed?'Terrain reasoning exceeded the 15-minute processing limit.':'Terrain Python processing failed. Check its optional dependencies.')));}
@@ -32,17 +35,18 @@ export function runReasoning(python,manifest,input,options={}) {
     child.on('error',()=>{});
   });
 }
-function checkedGeometry(geometry,pilot) {
+function checkedGeometry(geometry,pilot,{nativeValidated=false}={}) {
   if(!['Polygon','MultiPolygon'].includes(geometry?.type))throw Error('Terrain reasoning returned no polygon.');
   const f=feature(geometry);let count=0;
   coordEach(f,c=>{if(++count>250000||c.length!==2||!c.every(Number.isFinite)||c[0]<pilot.scope[0]-.001||c[0]>pilot.scope[2]+.001||c[1]<pilot.scope[1]-.001||c[1]>pilot.scope[3]+.001)throw Error('Terrain reasoning polygon exceeds its declared study area.');});
   const parts=geometry.type==='Polygon'?[geometry.coordinates]:geometry.coordinates;
-  if(parts.length>512||parts.some(coordinates=>!booleanValid(feature({type:'Polygon',coordinates}))))throw Error('Terrain reasoning returned invalid polygon parts.');
+  if(parts.length>512||parts.some(coordinates=>coordinates.some(ring=>ring.length<4||ring[0][0]!==ring.at(-1)[0]||ring[0][1]!==ring.at(-1)[1])||(!nativeValidated&&!booleanValid(feature({type:'Polygon',coordinates})))))throw Error('Terrain reasoning returned invalid polygon parts.');
   const km2=area(f)/1e6;if(!Number.isFinite(km2)||km2<=0||km2>area(bboxPolygon(pilot.scope))/1e6*1.01)throw Error('Terrain reasoning area is invalid.');
   return {geometry,bbox:bbox(f),areaKm2:km2};
 }
 export async function deriveTerrainReasoning(source,drainage,config,options={}) {
   const {settings,pilot}=pilotInput(config,drainage);
+  if(settings.floodSupport)return deriveFloodSupportedValley(source,drainage,settings,pilot,{...options,run:options.run||runReasoning,validate:(g,p)=>checkedGeometry(g,p,{nativeValidated:true})});
   const python=options.python||process.env.TERRAIN_PYTHON||join(project,'.venv-terrain',process.platform==='win32'?'Scripts/python.exe':'bin/python');
   if(!options.run)await access(python).catch(()=>{throw Error('Terrain Python environment is unavailable.');});
   const retained=await (options.retain||retainVicmapElevation)(source,pilot.scope,{runtimeDir:options.runtimeDir,
@@ -79,7 +83,7 @@ export async function deriveTerrainReasoning(source,drainage,config,options={}) 
       interpretation:'Physical terrain candidate; named-feature meaning and study cuts are separate assumptions.'},
     warnings:[pilot.scopeNote,...d.limitations,...(drainage.status==='partially_resolved'?['The principal river is partially resolved. Only its saved mapped flow-path geometry was used; no dotted river gaps were used.']:[])],
     evidence:[{sourceId:source.id,sourceName:source.name,sourceUrl:source.url,licence:source.licence,attribution:source.attribution,sourceVersion:source.version,
-      objectId:`Vicmap elevation cache: ${m.entries.length} bounded level-14 tiles`,importId,checksum:retained.checksum,role:'terrain_elevation'},
+      objectId:`Vicmap elevation cache: ${m.entries.length} bounded level-${m.plan.level} tiles`,importId,checksum:retained.checksum,role:'terrain_elevation'},
       ...(drainage.evidence||[]).map(e=>({...e,role:'principal_drainage_support'}))]};
 }
 
@@ -87,16 +91,21 @@ export async function runTerrainPilot(store,job,options={}) {
   const settings=store.featureSettings(job.id),config=terrainReasoningSchema.parse(settings.terrainReasoning),drainage=store.feature(config.drainageFeatureId);
   const source=store.sources().find(s=>s.id===config.sourceId),beforeSource=source&&demSourceFingerprint(source),beforeSettings=JSON.stringify(settings);
   if(source?.status!=='approved')throw Error('The terrain elevation source must be approved.');
+  const floodSource=config.floodSupport&&store.sources().find(s=>s.id===config.floodSupport.sourceId),beforeFlood=floodSource&&floodFingerprint(floodSource);
+  if(config.floodSupport&&(config.pilotId!=='loddon'||floodSource?.status!=='approved'||floodSource.format!=='nccma-flood'))throw Error('Loddon flood support requires an approved flood archive.');
   pilotInput(config,drainage);
   if(job.query.trim().toLowerCase()!==terrainPilots.find(p=>p.id===config.pilotId).name.toLowerCase())throw Error('Pilot settings do not match the requested valley name.');
   if((drainage.evidence||[]).some(e=>!store.sources().some(s=>s.id===e.sourceId&&s.status==='approved')))throw Error('A drainage evidence source is no longer approved.');
   const active=store.jobFeatures(job.id),old=store.db.prepare('SELECT data FROM features WHERE job_id=?').all(job.id).map(r=>JSON.parse(r.data));
   if(old.length>1)throw Error('Terrain pilot cannot replace a disambiguation list.');
   store.updateJob(job.id,'pending','processing','Deriving terrain candidates and comparing uncertainty settings.');
-  const result=await (options.terrainReasoner||deriveTerrainReasoning)(source,drainage,config,{runtimeDir:options.runtimeDir,
+  const result=await (options.terrainReasoner||deriveTerrainReasoning)(source,drainage,config,{runtimeDir:options.runtimeDir,floodSource,
     progress:message=>store.db.prepare('UPDATE jobs SET message=?,updated=? WHERE id=?').run(message,new Date().toISOString(),job.id),
-    saveImport:(checksum,payload,metadata)=>store.addImport(source.id,job.id,checksum,payload,metadata)});
+    saveImport:(checksum,payload,metadata)=>store.addImport(source.id,job.id,checksum,payload,metadata),
+    saveFloodImport:(checksum,payload,metadata)=>store.addImport(floodSource.id,job.id,checksum,payload,metadata)});
   const currentSource=store.sources().find(s=>s.id===config.sourceId),currentDrainage=store.feature(config.drainageFeatureId);
+  const currentFlood=floodSource&&store.sources().find(s=>s.id===floodSource.id);
+  if(floodSource&&(!currentFlood||currentFlood.status!=='approved'||floodFingerprint(currentFlood)!==beforeFlood))throw Error('Flood evidence changed during processing. Review and retry.');
   if(!currentSource||currentSource.status!=='approved'||demSourceFingerprint(currentSource)!==beforeSource||JSON.stringify(store.featureSettings(job.id))!==beforeSettings||
     !currentDrainage||drainageFingerprint(currentDrainage)!==config.drainageChecksum||currentDrainage.evidence.some(e=>!store.sources().some(s=>s.id===e.sourceId&&s.status==='approved')))throw Error('Terrain inputs changed during processing. Review and retry.');
   if(active[0]?.terrainReasoning?.inputFingerprint===result.terrainReasoning.inputFingerprint)return store.updateJob(job.id,'partially_resolved','available_estimate','Unchanged terrain interpretation retained.',active[0].id);

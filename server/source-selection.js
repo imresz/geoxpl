@@ -15,7 +15,7 @@ export function sourceKey(source) {
 
 export function selectSources(store,job,settings) {
   const current=store.jobFeatures(job.id).map(f=>f.selection?.sourceId).filter(Boolean);
-  const eligible=store.sources().filter(s=>s.status==='approved'&&s.type===job.type&&!['ga-dem','vic-dem10m'].includes(s.format)&&!contextualSource(s)&&
+  const eligible=store.sources().filter(s=>s.status==='approved'&&s.type===job.type&&!['ga-dem','vic-dem10m','nccma-flood'].includes(s.format)&&!contextualSource(s)&&
     (s.format!=='vic-gmu250'||settings.valleyFloor?.sourceId===s.id));
   const priority=s=>s.id===settings.preferredSourceId?0:current.includes(s.id)?1:2;
   eligible.sort((a,b)=>priority(a)-priority(b)||a.id.localeCompare(b.id));
@@ -41,7 +41,7 @@ export function sourceChangeTargets(store,old,source,newStatus) {
   for (const job of store.jobs()) {
     if (job.superseded_by || ['queued','importing','processing','researching'].includes(job.phase)) continue;
     const settings=store.featureSettings(job.id);
-    const explicit=[settings.preferredSourceId,settings.valleyFloor?.sourceId,settings.terrain?.sourceId,settings.terrainReasoning?.sourceId].includes(old.id);
+    const explicit=[settings.preferredSourceId,settings.valleyFloor?.sourceId,settings.terrain?.sourceId,settings.terrainReasoning?.sourceId,settings.terrainReasoning?.floodSupport?.sourceId].includes(old.id);
     const recommended=reports.find(r=>r.job_id===job.id)?.data.candidateIds?.includes(old.id);
     // Contextual waterbody approval is consumed by an explicit gap investigation, not a river-wide retry.
     const relevant=dependent.has(job.id)||explicit||(!contextualSource(source)&&job.type===source.type&&(matches.has(job.id)||recommended));

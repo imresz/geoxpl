@@ -1,11 +1,11 @@
 import './terrain-reasoning.css';
 export type TerrainMode='central'|'stableCore'|'outerEnvelope';
-export type TerrainOutline={geometry:GeoJSON.Geometry;bbox:[number,number,number,number];areaKm2:number};
+export type TerrainOutline={geometry:GeoJSON.Geometry;bbox:[number,number,number,number];areaKm2:number;boundaryEvidence?:import('./ValleyEvidence').ValleyBoundary};
 export type TerrainReasoningData={
-  version:string;contrast:string;scopeNote:string;scope:number[];rules:string[];limitations:string[];
+  version:string;contrast:string;scopeNote:string;scope:number[];previousScope?:number[];rules:string[];limitations:string[];
   stableCore:TerrainOutline;outerEnvelope:TerrainOutline;
   raster:{nominalSourceMetres:number;analysisCellMetres:number;cacheResolutionWebMercatorMetres:number;verticalRmseMetres:number;horizontalRmseMetres:number;sourceEpoch:string;verticalDatum:string;tileCount:number;checksum:string};
-  diagnostics:{intersectionOverUnion:number;weakReliefEdgeShare:number;studyCutEdgeShare:number;terrainSeparation:string;medianSlopeDegrees:number;
+  diagnostics:{intersectionOverUnion:number;weakReliefEdgeShare:number;studyCutEdgeShare:number;boundaryLengthShare?:number;floorRule?:string;terrainSeparation:string;medianSlopeDegrees:number;
     heightAboveDrainageMedianMetres:number|null;uncertainFringeKm2:number;scales:{radiusMetres:number;areaKm2:number}[];
     drainage:{mappedCellMatchShare:number;medianAcceptedSnapMetres:number;routingSupportKm2:number}};
 };
@@ -15,6 +15,7 @@ export function TerrainReasoning({data,mode='central',onMode}:{data:TerrainReaso
   const d=data.diagnostics,r=data.raster;
   return <section className="detail-section terrain-reasoning" aria-label="Terrain reasoning">
     <h3>Terrain reasoning</h3><p className="small">{data.contrast}</p>
+    {data.previousScope&&<p className="small">The study was expanded east and west, and slightly north and south, beyond the earlier pilot. Its limits are not the full named valley.</p>}
     {onMode&&<div className="geometry-modes" role="group" aria-label="Terrain interpretation">
       {([['central','Central'],['stableCore','Common area'],['outerEnvelope','Wider envelope']] as const).map(([value,label])=><button key={value} type="button" aria-pressed={mode===value} onClick={()=>onMode(value)}>{label}</button>)}
     </div>}
@@ -27,13 +28,14 @@ export function TerrainReasoning({data,mode='central',onMode}:{data:TerrainReaso
       <dt>Common area</dt><dd>{data.stableCore.areaKm2.toFixed(1)} km²</dd>
       <dt>Wider envelope</dt><dd>{data.outerEnvelope.areaKm2.toFixed(1)} km²</dd>
       <dt>Weak-relief edge</dt><dd>{pct(d.weakReliefEdgeShare)}</dd>
-      <dt>Artificial study cuts</dt><dd>{pct(d.studyCutEdgeShare)} of edge cells</dd>
+      <dt>Artificial study cuts</dt><dd>{d.boundaryLengthShare!=null?`${pct(d.boundaryLengthShare)} of outline length`:`${pct(d.studyCutEdgeShare)} of edge cells`}</dd>
       <dt>Mapped drainage supported</dt><dd>{pct(d.drainage.mappedCellMatchShare)}</dd>
       <dt>Median drainage adjustment</dt><dd>{d.drainage.medianAcceptedSnapMetres.toFixed(0)} m</dd>
     </dl>
     {d.terrainSeparation==='weak'&&<p className="warning">Low relief does not establish a sharp valley edge here, even when the tested settings agree.</p>}
     {d.studyCutEdgeShare>=.3&&<p className="warning">Much of the outline is cut by the study window, not a detected natural valley edge.</p>}
     <h3>Reasoning steps</h3><ol className="small">{data.rules.map(rule=><li key={rule}>{rule}</li>)}</ol>
+    {d.floorRule&&<><h3>Floor candidate rule</h3><p className="small">{d.floorRule}</p></>}
     <h3>Settings comparison</h3><dl>{d.scales.flatMap(s=>[<dt key={`${s.radiusMetres}-label`}>{s.radiusMetres} m neighbourhood</dt>,<dd key={s.radiusMetres}>{s.areaKm2.toFixed(1)} km²</dd>])}</dl>
     <p className="small muted">Grid-cell estimates; displayed polygon areas can differ slightly.</p>
     <details><summary>Retained elevation snapshot</summary><p className="small">{r.tileCount} numeric elevation tiles. Resampling does not improve the source accuracy.</p><pre>{r.checksum}</pre><p className="small">Processor {data.version}</p></details>
