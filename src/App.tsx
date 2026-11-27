@@ -9,6 +9,7 @@ import { evidencePilotKind, hasMappingHistory, MappingHistory } from './MappingH
 import './catalogue.css';
 import { RouteQuality,routeQualityOf,RouteSearchResults } from './RouteSearch';
 import type { RouteSearchData } from './api';
+import {terrainOf,type TerrainMode} from './TerrainReasoning';
 
 export function Brand() { return <a className="brand" href="/"><span className="brand-symbol"><Compass size={23}/></span><span>Geo<span className="brand-accent">Xpl</span></span></a>; }
 const FeatureIcon = ({type}:{type:string}) => type==='road_route'?<Route size={20}/>:type==='river'?<Waves size={20}/>:['national_park','state_forest','state_park'].includes(type)?<Trees size={20}/>:<Mountain size={20}/>;
@@ -31,10 +32,16 @@ export function App() {
   useEffect(() => { panel.current?.scrollTo({ top: 0 }); }, [selected?.id, job?.id, job?.selectionRequired, tab, typePrompt]);
   const [showNetwork, setShowNetwork] = useState(false);
   const [showFloor, setShowFloor] = useState(false);
+  const [terrainMode,setTerrainMode]=useState<TerrainMode>('central');
   const [focusedEstimate, setFocusedEstimate] = useState<Interpolation | null>(null);
   const [reviewFocus, setReviewFocus] = useState<[number, number] | null>(null);
-  useEffect(() => { setShowNetwork(false); setShowFloor(false); setFocusedEstimate(null); setReviewFocus(null); }, [selected]);
-  const displayedFeature = useMemo(() => selected && showNetwork && selected.recordedNetwork ? { ...selected, geometry: selected.recordedNetwork.geometry, bbox: selected.recordedNetwork.bbox, displayBbox: selected.recordedNetwork.bbox, interpolations: undefined } : selected && showFloor && selected.valleyFloor ? { ...selected, ...selected.valleyFloor, displayBbox: selected.valleyFloor.bbox } : selected, [selected, showNetwork, showFloor]);
+  useEffect(() => { setShowNetwork(false); setShowFloor(false); setTerrainMode('central'); setFocusedEstimate(null); setReviewFocus(null); }, [selected]);
+  const displayedFeature = useMemo(() => {
+    const terrain=terrainOf(selected);
+    if(selected&&terrain&&terrainMode!=='central')return {...selected,...terrain[terrainMode],displayBbox:terrain[terrainMode].bbox,
+      extentEstimate:selected.extentEstimate&&{...selected.extentEstimate,label:terrainMode==='stableCore'?'Terrain common area - estimated':'Terrain wider envelope - estimated'}};
+    return selected && showNetwork && selected.recordedNetwork ? { ...selected, geometry: selected.recordedNetwork.geometry, bbox: selected.recordedNetwork.bbox, displayBbox: selected.recordedNetwork.bbox, interpolations: undefined } : selected && showFloor && selected.valleyFloor ? { ...selected, ...selected.valleyFloor, displayBbox: selected.valleyFloor.bbox } : selected;
+  }, [selected, showNetwork, showFloor,terrainMode]);
   const refreshCatalogue = () => { api<FeatureSummary[]>('/catalogue?status=all').then(setCatalogue).catch(() => {});api('/route-discoveries').then(setRouteResearch).catch(()=>{}); };
   useEffect(() => { refreshCatalogue(); return () => active.current?.abort(); }, []);
   useEffect(()=>{
@@ -139,7 +146,7 @@ export function App() {
           {evidencePilot === 'route' && <p className="warning"><Info size={15}/>{selected.roadRoute?.contribution ? `Community-supported alignment · ${selected.roadRoute.contribution.author}. Current signing and permitted turns remain unverified.` : 'Road alignment matched. Current signing, turns and endpoints are not fully verified.'}</p>}
           {evidencePilot === 'valley' && <p className="warning"><Info size={15}/>{displayedFeature?.extentEstimate?.kind === 'terrain_valley' ? 'Terrain estimate. The outer edge varies with scale and is not an official or tourism-region boundary.' : 'Valley-floor estimate only. It does not show the full valley or its bounding slopes.'}</p>}
           {evidencePilot ? <details className="detail-section mapping-disclosure"><summary>How this was mapped</summary>
-            <MappingHistory key={`${selected.id}:${selected.created}`} featureId={selected.id} onLocate={point => setReviewFocus([...point])}/>
+            <MappingHistory key={`${selected.id}:${selected.created}`} featureId={selected.id} onLocate={point => setReviewFocus([...point])} terrainMode={terrainMode} onTerrainMode={setTerrainMode}/>
           </details> : hasMappingHistory(selected) && <div className="detail-section"><h2>How this was mapped</h2><MappingHistory key={`${selected.id}:${selected.created}`} featureId={selected.id}/></div>}
           {!evidencePilot && <div className="detail-section"><h2>Provenance</h2>{selected.evidence.filter((e, i, all) => all.findIndex(other => other.sourceId === e.sourceId) === i).map(e => <a key={e.sourceId} className="source-link" href={e.sourceUrl} target="_blank" rel="noreferrer"><span>{e.sourceName}<small>{e.licence}</small>{selected.extentEstimate && <small>{e.attribution}</small>}</span><ArrowUpRight size={16}/></a>)}<dl><dt>Source records</dt><dd>{selected.evidence.length}</dd><dt>Method</dt><dd>{selected.method.replaceAll('_', ' ')}</dd><dt>Processed</dt><dd>{new Date(selected.created).toLocaleDateString()}</dd></dl><details><summary>Processing evidence</summary><pre>{JSON.stringify({ id: selected.id, algorithm: selected.algorithmVersion, extentEstimate: selected.extentEstimate, principalDrainage: selected.principalDrainage, terrain: selected.terrain, identity: selected.identity, selection: selected.selection, mainStem: selected.mainStem, source: selected.source, mouth: selected.mouth, evidence: selected.evidence, interpolations: selected.interpolations, interpolationSummary: selected.interpolationSummary }, null, 2)}</pre></details></div>}
         </> : routeSearch&&!waiting?<RouteSearchResults key={JSON.stringify(routeSearch)} initial={routeSearch} loading={!!loadingFeature} onSelect={id=>void selectFeature(id)} onSearch={q=>{setQuery(q);setType('road_route');void search(undefined,{query:q,type:'road_route'});}}/>:job?.selectionRequired && !waiting ? <section className="matching-features" aria-label="Matching features">

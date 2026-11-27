@@ -3,6 +3,7 @@ import { processGeometry, algorithmVersion } from './processors.js';
 import { research, aiConfigured } from './research.js';
 import { createHash } from 'node:crypto';
 import { deriveTerrainValley } from './terrain.js';
+import { runTerrainPilot } from './terrain-reasoning.js';
 import { drainageFingerprint, eligibleValleyDrainage } from './valley-floor.js';
 import { runInvestigation } from './report-workflow.js';
 import { selectSources } from './source-selection.js';
@@ -21,6 +22,7 @@ export function createWorker(store, options = {}) {
     if (store.getJob(job.id)?.superseded_by) return;
     if (job.type === 'road_route') return runRoadRouteJob(store, job, options);
     const settings = store.featureSettings(job.id);
+    if(job.type==='valley'&&settings.terrainReasoning)return runTerrainPilot(store,job,options);
     const {selected:sources,duplicates}=selectSources(store,job,settings);
     for (const duplicate of duplicates) store.event(job.id,'source_duplicate_skipped',`${duplicate.source.name}: equivalent to ${duplicate.selected.name}; using source ${duplicate.selected.id}`);
     const forceResearch = store.setting(`research:${job.id}`) === 'true';

@@ -8,6 +8,8 @@ import { normalize } from './store.js';
 import { estimatedConnectionsSchema } from './interpolation.js';
 import { valleyFloorSchema, landformEndpoint, eligibleValleyDrainage } from './valley-floor.js';
 import { terrainSchema, demEndpoint } from './terrain.js';
+import { terrainReasoningSchema,pilotInput } from './terrain-reasoning.js';
+import { vicmapDemEndpoint } from './vicmap-dem.js';
 import { formationJunctionsSchema } from './geofabric.js';
 import { enqueueBatch, listBatches, batchStatus } from './batches.js';
 import { workflowView, queueInvestigation, applyInvestigation, changeReportState, updateRecommendation, recordReportReview } from './report-workflow.js';
@@ -20,6 +22,7 @@ import { localRouteView, localRouteRoads, saveLocalRoute, previewLocalRoute, pub
 import { routeMembershipReport } from './route-memberships.js';
 import { routeQuality,withRouteQuality } from './route-quality.js';
 import { routeSearchInput,namedRouteMatches,findRouteDiscovery,getRouteDiscovery,listRouteDiscoveries,queueRouteDiscovery,routeDiscoveryView } from './route-discovery.js';
+import { listBooks,bookDetail,saveBook,bookCitationFeatures,listBookCitations,saveBookCitation,withdrawBookCitation,bookReferenceCount,withBookReferenceCount,publicBookCitations } from './book-references.js';
 
 export function createApp(store, config = {}) {
   const app = express(); app.disable('x-powered-by');
@@ -49,7 +52,7 @@ export function createApp(store, config = {}) {
     return { id: job.id, query: job.query, type: job.type, status: job.status, phase: job.phase, message: job.message, created: job.created, updated: job.updated,
       ...(requested.superseded_by ? { requestedJobId: requested.id, supersededBy: job.id } : {}),
       selectionRequired: matches.length > 1, matches: matches.map(summary), feature: matches.length === 1 ?
-        (job.type==='road_route' ? withRouteQuality(matches[0]) : job.feature_id ? store.feature(job.feature_id) : null) : null };
+        withBookReferenceCount(store,job.type==='road_route' ? withRouteQuality(matches[0]) : job.feature_id ? store.feature(job.feature_id) : null) : null };
   };
   const discoveryResult=(input,row)=>({routeSearch:{query:input.query,
     matches:input.code?[]:namedRouteMatches(store,input,input.locality?(row?.state==='available'?row.data.records:[]):undefined).map(summary),
@@ -116,16 +119,18 @@ export function createApp(store, config = {}) {
     res.status(job.status === 'resolved' ? 200 : 202).json(viewJob(job));
   });
   app.get('/api/jobs/:id', (req, res) => { const job = store.getJob(req.params.id); if (!job) return res.status(404).json({ error: 'Job not found.' }); res.json(viewJob(job)); });
-  app.get('/api/features/:id', (req, res) => { const f = store.feature(req.params.id); if (!f) return res.status(404).json({ error: 'Feature not found.' }); res.json(withRouteQuality(f)); });
+  app.get('/api/features/:id', (req, res) => { const f = store.feature(req.params.id); if (!f) return res.status(404).json({ error: 'Feature not found.' }); res.json(withBookReferenceCount(store,withRouteQuality(f))); });
   app.get('/api/features/:id/provenance', (req, res) => {
     const { id } = req.params;
     const feature = store.feature(id);
-    if (!feature || !isProvenancePilot(feature)) return res.status(404).json({ error: 'Mapping history is not available for this feature.' });
+    const hasBooks=feature&&bookReferenceCount(store,id)>0;
+    if (!feature || (!isProvenancePilot(feature)&&!hasBooks)) return res.status(404).json({ error: 'Mapping history is not available for this feature.' });
     const revisions = store.featureRevisions(id);
     const revisionId = req.query.revision ?? revisions[0]?.id;
     const revision = typeof revisionId === 'string' ? store.featureRevision(id, revisionId) : null;
     if (req.query.revision !== undefined && !revision) return res.status(404).json({ error: 'Geometry revision not found.' });
     res.json({ revisions, revisionId, lineage: revision ? mappingLineage(revision) : null,
+      ...(hasBooks?{bookReferences:publicBookCitations(store,id,revisionId)}:{}),
       ...(revision?.type==='road_route' ? {routeQuality:routeQuality(revision),routeMemberships:routeMembershipReport(store.db,id,revisionId)} : {}) });
   });
   app.get('/api/admin/session', (req, res) => res.json({ authenticated: authenticated(req), setupRequired: !store.setting('password'), localSetup: config.localSetup !== false }));
@@ -147,6 +152,18 @@ export function createApp(store, config = {}) {
   });
   app.post('/api/admin/logout', requireAdmin, (req, res) => { const token = tokenFrom(req); store.db.prepare('DELETE FROM sessions WHERE token=?').run(createHash('sha256').update(token).digest('hex')); res.clearCookie('geoxpl_session', { path: '/' }); res.json({ ok: true }); });
   app.use('/api/admin', requireAdmin);
+  const bookOperation=fn=>(req,res)=>{
+    try{res.json(fn(req));}catch(e){res.status(e instanceof z.ZodError?400:e.status||409).json({error:e instanceof z.ZodError?e.issues.map(i=>i.message).join('; '):e.message});}
+  };
+  app.get('/api/admin/books',bookOperation(()=>listBooks(store)));
+  app.get('/api/admin/books/:id',bookOperation(req=>bookDetail(store,z.uuid().parse(req.params.id))));
+  app.post('/api/admin/books',bookOperation(req=>saveBook(store,null,req.body)));
+  app.put('/api/admin/books/:id',bookOperation(req=>saveBook(store,z.uuid().parse(req.params.id),req.body)));
+  app.get('/api/admin/book-reference-features',bookOperation(()=>bookCitationFeatures(store)));
+  app.get('/api/admin/book-citations',bookOperation(req=>listBookCitations(store,req.query.featureId===undefined?undefined:z.uuid().parse(req.query.featureId))));
+  app.post('/api/admin/book-citations',bookOperation(req=>saveBookCitation(store,null,req.body)));
+  app.put('/api/admin/book-citations/:id',bookOperation(req=>saveBookCitation(store,z.uuid().parse(req.params.id),req.body)));
+  app.post('/api/admin/book-citations/:id/withdraw',bookOperation(req=>withdrawBookCitation(store,z.uuid().parse(req.params.id),req.body)));
   app.get('/api/admin/route-discoveries',(_req,res)=>res.json(listRouteDiscoveries(store).map(row=>routeDiscoveryView(store,row,{history:true}))));
   app.post('/api/admin/route-discoveries/:id/retry',(req,res)=>{
     const row=getRouteDiscovery(store,req.params.id);if(!row)return res.status(404).json({error:'Route research not found.'});
@@ -200,7 +217,7 @@ export function createApp(store, config = {}) {
     }
   });
   app.get('/api/admin/overview', (_req, res) => res.json({ jobs: store.jobs().map(j => ({ ...j, matches: store.jobFeatures(j.id).map(summary), settings: store.featureSettings(j.id) })), sources: store.sources(), reports: store.reports(), features: store.features().map(({ geometry, recordedNetwork, ...f }) => f.type === 'road_route' ? summary(f) : f), events: store.db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT 100').all(), searches: store.db.prepare('SELECT COUNT(*) AS count FROM searches').get().count, imports: store.db.prepare('SELECT id,source_id,job_id,created,checksum FROM imports ORDER BY created DESC LIMIT 100').all(), aiConfigured: aiConfigured(), aiHourlyLimit: Math.max(1, Math.min(30, Number(process.env.AI_REQUESTS_PER_HOUR) || 3)) }));
-  const validLandformSource = source => (source.format !== 'vic-gmu250' || (source.type === 'valley' && source.url === landformEndpoint)) && (source.format !== 'ga-dem' || (source.type === 'valley' && source.url === demEndpoint));
+  const validLandformSource = source => (source.format !== 'vic-gmu250' || (source.type === 'valley' && source.url === landformEndpoint)) && (source.format !== 'ga-dem' || (source.type === 'valley' && source.url === demEndpoint)) && (source.format !== 'vic-dem10m' || (source.type === 'valley' && source.url === vicmapDemEndpoint));
   app.post('/api/admin/sources', (req, res) => {
     const source = sourceSchema.parse(req.body);
     if (!validLandformSource(source)) return res.status(400).json({ error: 'Terrain and GMU250 sources require type Valley and their supported official endpoint.' });
@@ -248,8 +265,13 @@ export function createApp(store, config = {}) {
     const job = store.getJob(req.params.id); if (!job) return res.status(404).json({ error: 'Job not found.' });
     if (job.superseded_by) return res.status(409).json({ error: 'This request is superseded. Use the current request.' });
     if (['queued', 'importing', 'processing', 'researching'].includes(job.phase)) return res.status(409).json({ error: 'Wait for the active attempt to finish before changing feature settings.' });
-    const settings = z.object({ aliases: z.array(z.string().trim().min(2).max(150)).max(20), preferredSourceId: z.string().nullable(), estimatedConnections: estimatedConnectionsSchema.optional(), formationJunctions: formationJunctionsSchema.optional(), valleyFloor: valleyFloorSchema.nullable().optional(), terrain: terrainSchema.nullable().optional() }).parse(req.body);
+    const settings = z.object({ aliases: z.array(z.string().trim().min(2).max(150)).max(20), preferredSourceId: z.string().nullable(), estimatedConnections: estimatedConnectionsSchema.optional(), formationJunctions: formationJunctionsSchema.optional(), valleyFloor: valleyFloorSchema.nullable().optional(), terrain: terrainSchema.nullable().optional(),terrainReasoning:terrainReasoningSchema.nullable().optional() }).parse(req.body);
     const previous = store.featureSettings(job.id);
+    if(settings.terrainReasoning===undefined&&previous.terrainReasoning)settings.terrainReasoning=previous.terrainReasoning;
+    if(settings.terrainReasoning){
+      if(job.type!=='valley'||!store.sources().some(s=>s.id===settings.terrainReasoning.sourceId&&s.status==='approved'&&s.format==='vic-dem10m'&&validLandformSource(s)))return res.status(400).json({error:'Terrain reasoning requires an approved Vicmap numeric elevation source.'});
+      try{pilotInput(settings.terrainReasoning,store.feature(settings.terrainReasoning.drainageFeatureId));}catch(error){return res.status(400).json({error:error.message});}
+    }
     settings.aliases = [...new Set(settings.aliases.map(normalize))].filter(a => a !== job.normalized).sort();
     if (settings.formationJunctions === undefined && previous.formationJunctions && JSON.stringify(previous.aliases) === JSON.stringify(settings.aliases)) settings.formationJunctions = previous.formationJunctions;
     if (settings.formationJunctions?.length && job.type !== 'river') return res.status(400).json({ error: 'Named-watercourse junction reviews apply only to rivers.' });
@@ -263,7 +285,7 @@ export function createApp(store, config = {}) {
       if (!eligibleValleyDrainage(definition, drainage)) return res.status(400).json({ error: 'Select a current resolved river as the principal drainage, or retain the explicitly reviewed mapped revision.' });
       definition.recordIds = [...new Set(definition.recordIds)].sort();
     }
-    if (settings.preferredSourceId && !store.sources().some(s => s.id === settings.preferredSourceId && s.type === job.type && s.status === 'approved' && s.format !== 'ga-dem')) return res.status(400).json({ error: 'Select an approved vector source of the same feature type.' });
+    if (settings.preferredSourceId && !store.sources().some(s => s.id === settings.preferredSourceId && s.type === job.type && s.status === 'approved' && !['ga-dem','vic-dem10m'].includes(s.format))) return res.status(400).json({ error: 'Select an approved vector source of the same feature type.' });
     if (JSON.stringify(settings) === JSON.stringify(store.featureSettings(job.id))) return res.json({ ok: true, unchanged: true });
     store.setFeatureSettings(job.id, settings);
     store.invalidateFeature(job.id, 'Feature identity or source selection changed. Reprocessing required.');

@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { indexRouteRevision } from './route-memberships.js';
 import { createRouteDiscoveryTables,backfillRouteNames,indexRouteNames } from './route-discovery.js';
+import { initialiseBookReferences } from './book-references.js';
 
 export const normalize = value => value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-AU');
 export function featureSearchTerms(query, type, aliases = []) {
@@ -59,6 +60,7 @@ export function createStore(path = 'runtime/geoxpl.sqlite') {
   }
   createRouteDiscoveryTables(db);
   backfillRouteNames(db);
+  initialiseBookReferences({db});
   const getJob = id => db.prepare('SELECT * FROM jobs WHERE id=?').get(id);
   const currentJob = id => {
     let job = getJob(id);

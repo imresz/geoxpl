@@ -4,6 +4,9 @@ import { MetroRouteReview } from './MetroRouteReview';
 import { RouteMemberships, type RouteMembershipReport } from './RouteMemberships';
 import { RouteQuality } from './RouteSearch';
 import type { RouteQualityData } from './api';
+import { BookReferenceNotes } from './BookReferenceNotes';
+import type { PublicBookCitation } from './book-reference-types';
+import {TerrainReasoning,terrainOf,type TerrainReasoningData,type TerrainMode} from './TerrainReasoning';
 
 type Evidence = {
   sourceName?: string; sourceUrl?: string; sourceVersion?: string; attribution?: string;
@@ -14,12 +17,14 @@ type History = {
   revisionId?: string;
   routeMemberships?: RouteMembershipReport;
   routeQuality?: RouteQualityData;
+  bookReferences?: PublicBookCitation[];
   lineage: {
     method?: string; description?: string; processorVersion?: string; status?: string; geometryType?: string;
     limitations: string[]; evidence?: Evidence[];
     routeReview?: MetroReview; routeSegments?: number;
     extent?: ExtentEstimate; areaKm2?: number; floorAreaKm2?: number;
     scaleSensitivity?: { intersectionOverUnion: number; scalesMetres: number[]; areaKm2: number[] };
+    terrainReasoning?:TerrainReasoningData;
     contribution?: { author:string; basis:string; observedAt:string; statement:string; uncertainty:string; version:number; links:string[] };
     estimates?: { id: string; label: string; method: string; certainty: string; lengthKm: number; basis?: string; evidenceRecord?: string }[];
   } | null;
@@ -27,17 +32,17 @@ type History = {
 
 export function hasMappingHistory(feature: Feature) {
   const name = (feature.statePark?.officialName || feature.name).normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-AU');
-  return (feature.type === 'state_park' && name === 'bunyip state park') ||
+  return !!(feature as Feature&{bookReferenceCount?:number}).bookReferenceCount || (feature.type === 'state_park' && name === 'bunyip state park') ||
     (feature.type === 'river' && ['avoca', 'avoca river'].includes(name)) || !!evidencePilotKind(feature);
 }
 
 export function evidencePilotKind(feature: Feature) {
   if (feature.type === 'road_route' && feature.roadRoute) return 'route';
-  if (feature.type === 'valley' && feature.name.trim().toLowerCase() === 'yarra valley' && feature.extentEstimate) return 'valley';
+  if (terrainOf(feature)||(feature.type === 'valley' && feature.name.trim().toLowerCase() === 'yarra valley' && feature.extentEstimate)) return 'valley';
   return null;
 }
 
-export function MappingHistory({ featureId, onLocate }: { featureId: string; onLocate?: (point: [number, number]) => void }) {
+export function MappingHistory({ featureId, onLocate,terrainMode,onTerrainMode }: { featureId: string; onLocate?: (point: [number, number]) => void;terrainMode?:TerrainMode;onTerrainMode?:(mode:TerrainMode)=>void }) {
   const [revision, setRevision] = useState('');
   const [history, setHistory] = useState<History>();
   const [error, setError] = useState('');
@@ -73,6 +78,7 @@ export function MappingHistory({ featureId, onLocate }: { featureId: string; onL
         {history?.revisions[0].id !== history?.revisionId && <p className="muted small">Earlier revision. The map still shows the current geometry.</p>}
         <p>{lineage.description || lineage.method?.replaceAll('_', ' ') || 'Processing method not recorded.'}</p>
         <RouteQuality quality={history?.routeQuality} details/>
+        {history?.bookReferences&&<BookReferenceNotes references={history.bookReferences}/>}
         {history?.routeMemberships&&<RouteMemberships key={history.revisionId} report={history.routeMemberships}
           onLocate={history.revisions[0].id===history.revisionId ? onLocate : undefined}/>}
         {lineage.contribution && <section className="detail-section"><h3>Local contribution</h3>
@@ -87,7 +93,7 @@ export function MappingHistory({ featureId, onLocate }: { featureId: string; onL
           <p className="small">{lineage.extent.scopeNote}</p>
           <p className="small muted">{lineage.extent.sourceScale}</p>
           <dl>
-            {lineage.areaKm2 != null && <><dt>Estimated area</dt><dd>{lineage.areaKm2.toFixed(1)} km²</dd></>}
+            {lineage.areaKm2 != null && <><dt>{lineage.terrainReasoning?'Central estimated area':'Estimated area'}</dt><dd>{lineage.areaKm2.toFixed(1)} km²</dd></>}
             {lineage.floorAreaKm2 != null && <><dt>Valley floor</dt><dd>{lineage.floorAreaKm2.toFixed(1)} km²</dd></>}
           </dl>
           {lineage.scaleSensitivity && <><h3>How much the outline changes</h3>
@@ -96,6 +102,7 @@ export function MappingHistory({ featureId, onLocate }: { featureId: string; onL
           </>}
           <a className="source-link" href={lineage.extent.evidenceUrl} target="_blank" rel="noreferrer">Geographic context</a>
         </section>}
+        {lineage.terrainReasoning&&<TerrainReasoning data={lineage.terrainReasoning} mode={terrainMode} onMode={history?.revisions[0].id===history?.revisionId?onTerrainMode:undefined}/>}
         <dl><dt>Result</dt><dd>{lineage.status ? statusLabel(lineage.status) : 'Not recorded'}{lineage.geometryType && ` · ${lineage.geometryType}`}</dd>
           <dt>Processor</dt><dd>{lineage.processorVersion || 'Not recorded'}</dd></dl>
         <h3>Published inputs</h3>

@@ -1,0 +1,4 @@
+.terrain-reasoning .geometry-modes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.terrain-reasoning h3 { margin: 16px 0 8px; }
+.terrain-reasoning ol { padding-left: 20px; line-height: 1.6; }
+.terrain-reasoning li { margin-bottom: 8px; overflow-wrap: anywhere; }
